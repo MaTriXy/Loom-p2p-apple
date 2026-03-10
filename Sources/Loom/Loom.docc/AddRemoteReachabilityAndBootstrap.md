@@ -67,8 +67,7 @@ Use ``LoomBootstrapMetadata`` to publish optional recovery channels such as:
 ```swift
 let bootstrapMetadata = LoomBootstrapMetadata(
     enabled: true,
-    supportsControlChannel: true,
-    supportsCredentialSubmission: true,
+    supportsPreloginDaemon: true,
     endpoints: [
         .init(host: "host.example.com", port: 22, source: .user),
         .init(host: "192.168.1.25", port: 22, source: .auto),

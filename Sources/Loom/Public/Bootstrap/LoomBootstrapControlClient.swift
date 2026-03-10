@@ -40,20 +40,20 @@ public enum LoomBootstrapControlError: LocalizedError, Sendable, Equatable {
 
 /// Daemon handoff result.
 public struct LoomBootstrapControlResult: Sendable, Equatable {
-    /// Current peer availability after control request.
-    public let availability: LoomSessionAvailability
+    /// Current peer session state after the control request.
+    public let state: LoomSessionAvailability
     /// Optional peer diagnostic message.
     public let message: String?
-    /// Whether the peer is ready for a normal session.
-    public var isReady: Bool { availability.isReady }
+    /// Whether the peer has an active post-unlock session.
+    public var isSessionActive: Bool { state.isReady }
 
-    public init(availability: LoomSessionAvailability, message: String?) {
-        self.availability = availability
+    public init(state: LoomSessionAvailability, message: String?) {
+        self.state = state
         self.message = message
     }
 }
 
-/// Cross-platform bootstrap control contract for daemon handoff and credential submission.
+/// Cross-platform bootstrap control contract for daemon handoff and unlock requests.
 public protocol LoomBootstrapControlClient: Sendable {
     func requestStatus(
         endpoint: LoomBootstrapEndpoint,
@@ -62,12 +62,12 @@ public protocol LoomBootstrapControlClient: Sendable {
         timeout: Duration
     ) async throws -> LoomBootstrapControlResult
 
-    func submitCredentials(
+    func requestUnlock(
         endpoint: LoomBootstrapEndpoint,
         controlPort: UInt16,
         controlAuthSecret: String,
-        userIdentifier: String?,
-        secret: String,
+        username: String,
+        password: String,
         timeout: Duration
     ) async throws -> LoomBootstrapControlResult
 }
@@ -95,21 +95,21 @@ public struct LoomDefaultBootstrapControlClient: LoomBootstrapControlClient {
             timeout: timeout
         )
         return LoomBootstrapControlResult(
-            availability: response.availability,
+            state: response.availability,
             message: response.message
         )
     }
 
-    public func submitCredentials(
+    public func requestUnlock(
         endpoint: LoomBootstrapEndpoint,
         controlPort: UInt16,
         controlAuthSecret: String,
-        userIdentifier: String?,
-        secret: String,
+        username: String,
+        password: String,
         timeout: Duration
     )
     async throws -> LoomBootstrapControlResult {
-        let trimmedSecret = secret.trimmingCharacters(in: .newlines)
+        let trimmedSecret = password.trimmingCharacters(in: .newlines)
         guard !trimmedSecret.isEmpty else {
             throw LoomBootstrapControlError.protocolViolation("Credential secret is empty.")
         }
@@ -118,7 +118,7 @@ public struct LoomDefaultBootstrapControlClient: LoomBootstrapControlClient {
         let timestampMs = LoomIdentitySigning.currentTimestampMs()
         let nonce = UUID().uuidString.lowercased()
         let credentials = LoomBootstrapCredentials(
-            userIdentifier: userIdentifier,
+            userIdentifier: username,
             secret: trimmedSecret
         )
         let encryptedPayload = try LoomBootstrapControlSecurity.encryptCredentials(
@@ -149,7 +149,7 @@ public struct LoomDefaultBootstrapControlClient: LoomBootstrapControlClient {
         }
 
         return LoomBootstrapControlResult(
-            availability: response.availability,
+            state: response.availability,
             message: response.message
         )
     }

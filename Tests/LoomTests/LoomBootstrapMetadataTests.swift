@@ -17,8 +17,7 @@ struct LoomBootstrapMetadataTests {
     func bootstrapMetadataCodableRoundtrip() throws {
         let metadata = LoomBootstrapMetadata(
             enabled: true,
-            supportsControlChannel: true,
-            supportsCredentialSubmission: true,
+            supportsPreloginDaemon: true,
             endpoints: [
                 LoomBootstrapEndpoint(host: "host-a.local", port: 22, source: .user),
                 LoomBootstrapEndpoint(host: "10.0.0.21", port: 22, source: .auto),
@@ -93,7 +92,7 @@ struct LoomBootstrapMetadataTests {
     func sshBootstrapRejectsInvalidEndpoint() async {
         let client = LoomDefaultSSHBootstrapClient()
         do {
-            _ = try await client.submitCredentialsOverSSH(
+            _ = try await client.unlockVolumeOverSSH(
                 endpoint: LoomBootstrapEndpoint(host: "   ", port: 22, source: .auto),
                 username: "user",
                 password: "password",
@@ -117,7 +116,7 @@ struct LoomBootstrapMetadataTests {
     func sshBootstrapRejectsMissingHostFingerprint() async {
         let client = LoomDefaultSSHBootstrapClient()
         do {
-            _ = try await client.submitCredentialsOverSSH(
+            _ = try await client.unlockVolumeOverSSH(
                 endpoint: LoomBootstrapEndpoint(host: "127.0.0.1", port: 22, source: .auto),
                 username: "user",
                 password: "password",

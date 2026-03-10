@@ -13,12 +13,23 @@ import Testing
 
 @Suite("Loom CloudKit Bootstrap Metadata")
 struct LoomCloudKitBootstrapMetadataTests {
+    @MainActor
+    @Test("CloudKit peer provider defaults to empty peer lists")
+    func cloudKitPeerProviderDefaultsToEmptyPeerLists() {
+        let manager = LoomCloudKitManager(
+            configuration: LoomCloudKitConfiguration(containerIdentifier: "iCloud.com.example.test")
+        )
+        let provider = LoomCloudKitPeerProvider(cloudKitManager: manager)
+
+        #expect(provider.ownPeers.isEmpty)
+        #expect(provider.sharedPeers.isEmpty)
+    }
+
     @Test("CloudKit bootstrap metadata blob roundtrip")
     func cloudKitBootstrapMetadataBlobRoundtrip() throws {
         let metadata = LoomBootstrapMetadata(
             enabled: true,
-            supportsControlChannel: false,
-            supportsCredentialSubmission: true,
+            supportsPreloginDaemon: false,
             endpoints: [LoomBootstrapEndpoint(host: "203.0.113.9", port: 2222, source: .user)],
             sshPort: 2222,
             controlPort: 9851,

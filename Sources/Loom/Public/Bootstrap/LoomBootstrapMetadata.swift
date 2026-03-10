@@ -68,16 +68,14 @@ public struct LoomWakeOnLANInfo: Codable, Hashable, Sendable {
 /// Bootstrap capability metadata stored with peer records.
 public struct LoomBootstrapMetadata: Codable, Hashable, Sendable {
     /// Metadata version for forward-compatible decoding.
-    public static let currentVersion = 2
+    public static let currentVersion = 3
 
     /// Metadata schema version.
     public let version: Int
     /// Whether the peer opted into bootstrap recovery features.
     public let enabled: Bool
-    /// Whether the peer supports the authenticated bootstrap control channel.
-    public let supportsControlChannel: Bool
-    /// Whether the peer accepts encrypted credential submission over the control channel.
-    public let supportsCredentialSubmission: Bool
+    /// Whether the peer exposes a pre-login daemon that can accept unlock requests.
+    public let supportsPreloginDaemon: Bool
     /// SSH/bootstrap endpoints published by the peer.
     public let endpoints: [LoomBootstrapEndpoint]
     /// Preferred SSH port for SSH-based bootstrap credential submission.
@@ -96,8 +94,7 @@ public struct LoomBootstrapMetadata: Codable, Hashable, Sendable {
     /// - Parameters:
     ///   - version: Metadata version. Keep default unless you are migrating schema.
     ///   - enabled: Whether bootstrap recovery is enabled by user policy.
-    ///   - supportsControlChannel: Whether daemon handoff APIs are available.
-    ///   - supportsCredentialSubmission: Whether the peer accepts encrypted credential submission after bootstrap.
+    ///   - supportsPreloginDaemon: Whether a pre-login daemon is available for unlock handoff.
     ///   - endpoints: Candidate endpoints for bootstrap connection attempts.
     ///   - sshPort: Preferred SSH port.
     ///   - controlPort: Preferred daemon control port.
@@ -109,8 +106,7 @@ public struct LoomBootstrapMetadata: Codable, Hashable, Sendable {
     /// ```swift
     /// let metadata = LoomBootstrapMetadata(
     ///     enabled: true,
-    ///     supportsControlChannel: true,
-    ///     supportsCredentialSubmission: true,
+    ///     supportsPreloginDaemon: true,
     ///     endpoints: [.init(host: "192.168.1.10", port: 22, source: .auto)],
     ///     sshPort: 22,
     ///     controlPort: 9849,
@@ -122,8 +118,7 @@ public struct LoomBootstrapMetadata: Codable, Hashable, Sendable {
     public init(
         version: Int = LoomBootstrapMetadata.currentVersion,
         enabled: Bool,
-        supportsControlChannel: Bool,
-        supportsCredentialSubmission: Bool,
+        supportsPreloginDaemon: Bool,
         endpoints: [LoomBootstrapEndpoint],
         sshPort: UInt16?,
         controlPort: UInt16?,
@@ -133,8 +128,7 @@ public struct LoomBootstrapMetadata: Codable, Hashable, Sendable {
     ) {
         self.version = version
         self.enabled = enabled
-        self.supportsControlChannel = supportsControlChannel
-        self.supportsCredentialSubmission = supportsCredentialSubmission
+        self.supportsPreloginDaemon = supportsPreloginDaemon
         self.endpoints = endpoints
         self.sshPort = sshPort
         self.controlPort = controlPort

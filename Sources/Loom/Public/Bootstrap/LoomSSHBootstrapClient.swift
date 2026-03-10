@@ -18,16 +18,16 @@ import CryptoKit
 #endif
 #endif
 
-/// Result of an SSH bootstrap credential submission attempt.
+/// Result of an SSH bootstrap unlock attempt.
 public struct LoomSSHBootstrapResult: Sendable, Equatable {
-    /// Whether the remote endpoint accepted the submitted credentials.
-    public let credentialsAccepted: Bool
+    /// Whether the remote endpoint completed the requested unlock flow.
+    public let unlocked: Bool
 
     /// Creates an SSH bootstrap result.
     ///
-    /// - Parameter credentialsAccepted: `true` when the target accepted the submitted credentials.
-    public init(credentialsAccepted: Bool) {
-        self.credentialsAccepted = credentialsAccepted
+    /// - Parameter unlocked: `true` when the target completed the unlock flow.
+    public init(unlocked: Bool) {
+        self.unlocked = unlocked
     }
 }
 
@@ -59,9 +59,9 @@ public enum LoomSSHBootstrapError: LocalizedError, Sendable, Equatable {
     }
 }
 
-/// Cross-platform SSH client contract for bootstrap credential validation.
+/// Cross-platform SSH client contract for bootstrap unlock flows.
 public protocol LoomSSHBootstrapClient: Sendable {
-    /// Attempts authenticated bootstrap over SSH.
+    /// Attempts a remote unlock flow over SSH.
     ///
     /// - Parameters:
     ///   - endpoint: Host endpoint to contact.
@@ -69,9 +69,9 @@ public protocol LoomSSHBootstrapClient: Sendable {
     ///   - password: Account password used for SSH authentication.
     ///   - expectedHostKeyFingerprint: Pinned host key fingerprint (`SHA256:...`).
     ///   - timeout: End-to-end timeout for connection and auth probe.
-    /// - Returns: Credential-submission status returned by the SSH bootstrap implementation.
+    /// - Returns: Unlock status returned by the SSH bootstrap implementation.
     /// - Throws: ``LoomSSHBootstrapError`` on auth, transport, or timeout failures.
-    func submitCredentialsOverSSH(
+    func unlockVolumeOverSSH(
         endpoint: LoomBootstrapEndpoint,
         username: String,
         password: String,
@@ -92,8 +92,8 @@ public struct LoomDefaultSSHBootstrapClient: LoomSSHBootstrapClient {
     /// Executes the default SSH bootstrap probe.
     ///
     /// The default implementation authenticates and runs `/usr/bin/true` to validate credentials
-    /// and endpoint reachability before returning `credentialsAccepted = true`.
-    public func submitCredentialsOverSSH(
+    /// and endpoint reachability before returning `unlocked = true`.
+    public func unlockVolumeOverSSH(
         endpoint: LoomBootstrapEndpoint,
         username: String,
         password: String,
@@ -217,7 +217,7 @@ private extension LoomDefaultSSHBootstrapClient {
                     "SSH bootstrap probe command returned status \(exitStatus)."
                 )
             }
-            return LoomSSHBootstrapResult(credentialsAccepted: true)
+            return LoomSSHBootstrapResult(unlocked: true)
         } catch let error as LoomSSHBootstrapError {
             try? await shutdownEventLoopGroup(eventLoopGroup)
             throw error

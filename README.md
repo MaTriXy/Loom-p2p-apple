@@ -1,32 +1,72 @@
 # Loom
 
-Loom is a Swift package for building trusted device-to-device connections on Apple platforms.
+Build Apple-native device-to-device features without building a networking stack from scratch.
 
-It gives you the networking layer for apps that need to find nearby peers, establish sessions, verify identity, and support remote reachability without baking product-specific behavior into the transport stack.
+Loom is a Swift package for apps that need to find other devices, connect directly, verify identity, make trust decisions, and keep working when the local network is not the whole story.
+
+It is designed for Apple platforms, stays product-agnostic, and gives you a clean base for the part every multi-device app eventually has to build.
 
 Used in [MirageKit](https://github.com/EthanLipnik/MirageKit).
 
-## Why Loom
+## Why developers use Loom
 
-- Discover peers over Bonjour with peer-to-peer support
-- Establish direct sessions with `Network.framework`
-- Generate and rotate stable device identity with `LoomIdentityManager`
-- Plug in trust policy with `LoomTrustProvider` and `LoomTrustStore`
-- Add remote coordination with relay presence and STUN probing
-- Support bootstrap flows such as Wake-on-LAN, SSH, and control-channel credential exchange
-- Capture networking diagnostics and instrumentation
+If you are building something that talks to another device, you usually end up piecing together:
 
-## Modules
+- discovery
+- direct connections
+- identity
+- trust
+- remote reachability
+- diagnostics
 
-- `Loom`: Core discovery, identity, trust, sessions, relay, bootstrap, and diagnostics APIs
-- `LoomCloudKit`: Optional CloudKit-backed peer sharing and trust integration
+Loom gives you those building blocks as a reusable Swift package.
 
-## Requirements
+That means you can focus on your app's behavior instead of spending weeks rebuilding networking plumbing.
 
-- Swift 6.2+
-- macOS 14+
-- iOS 17.4+
-- visionOS 26+
+## What you can build with it
+
+Loom is a good fit for things like:
+
+- Mac and iPhone companion apps
+- local-first collaboration tools
+- device control surfaces
+- host and client apps on the same network
+- pro apps that need to discover and connect to nearby machines
+- products that start local but eventually need remote coordination
+
+## What Loom gives you
+
+### Core package: `Loom`
+
+- Nearby peer discovery over Bonjour, including peer-to-peer support
+- Direct sessions built on `Network.framework`
+- Stable device identity and key management
+- Pluggable trust policy and local trust storage
+- Remote reachability support with relay presence and network probing
+- Bootstrap tools for flows like Wake-on-LAN and SSH handoff
+- Diagnostics and instrumentation hooks
+
+### Optional package: `LoomCloudKit`
+
+- CloudKit-backed peer sharing
+- CloudKit-backed trust decisions
+- Share and participant management for multi-device apps
+
+## What Loom does not do
+
+This part matters, especially if you are new to this space.
+
+Loom is the transport layer, not the product layer.
+
+Loom does not decide:
+
+- your app's protocol
+- your message schema
+- your UI
+- your product roles
+- your CloudKit schema naming
+
+Your app owns those decisions. Loom gives you the network foundation underneath them.
 
 ## Installation
 
@@ -38,21 +78,26 @@ dependencies: [
 ]
 ```
 
-Then depend on either product:
+Then add the product you want to your target:
 
 ```swift
 .target(
     name: "MyApp",
     dependencies: [
         .product(name: "Loom", package: "Loom"),
+        // Add this too if you want CloudKit-backed peer sharing or trust:
         // .product(name: "LoomCloudKit", package: "Loom"),
     ]
 )
 ```
 
-## Quick Start
+## Basic usage
 
-Create a node:
+The main type to understand is `LoomNode`.
+
+Think of `LoomNode` as the networking hub for one part of your app. It owns discovery, advertising, sessions, and the identity and trust collaborators you inject into it.
+
+### 1. Create a node
 
 ```swift
 import Loom
@@ -66,7 +111,13 @@ let node = LoomNode(
 )
 ```
 
-Advertise your device:
+If you are just getting started, that is the right mental model:
+
+- choose a Bonjour service type for your app
+- decide whether peer-to-peer browsing should be enabled
+- create one `LoomNode` for the runtime surface you are building
+
+### 2. Advertise your device
 
 ```swift
 import Foundation
@@ -78,8 +129,8 @@ let advertisement = LoomPeerAdvertisement(
     identityKeyID: identity.keyID,
     deviceType: .mac,
     metadata: [
-        "app.version": "1",
-        "role": "host",
+        "myapp.role": "host",
+        "myapp.protocol": "1",
     ]
 )
 
@@ -93,7 +144,11 @@ let port = try await node.startAdvertising(
 print("Advertising on port \(port)")
 ```
 
-Discover peers:
+This makes your device discoverable and hands you a `LoomSession` when someone connects.
+
+In a real app, keep `deviceID` stable instead of generating a new `UUID()` every launch. Your identity story gets much simpler if the device can be recognized over time.
+
+### 3. Browse for peers
 
 ```swift
 let discovery = node.makeDiscovery()
@@ -107,7 +162,9 @@ discovery.onPeersChanged = { peers in
 discovery.startDiscovery()
 ```
 
-Connect to a peer:
+At this stage, you are discovering peers and reading their advertised metadata. Your app still decides whether a peer is compatible, trusted, or worth connecting to.
+
+### 4. Open a session
 
 ```swift
 import Network
@@ -122,22 +179,31 @@ session.setStateUpdateHandler { state in
 session.start(queue: .main)
 ```
 
-## CloudKit Integration
+Once the session exists, your app takes over again. That is where your own protocol, handshake, message framing, and product logic should live.
 
-If your app needs shared peer membership or CloudKit-backed trust decisions, add `LoomCloudKit`.
+## The simple mental model
 
-The module includes:
+If you only remember one thing, make it this:
 
-- `LoomCloudKitManager` for CloudKit lifecycle and identity registration
-- `LoomCloudKitPeerProvider` for fetching shared peers
-- `LoomCloudKitTrustProvider` for trust evaluation backed by CloudKit participants
-- `LoomCloudKitShareManager` for sharing UI and participant management
+1. `LoomNode` manages discovery and connections.
+2. `LoomPeerAdvertisement` tells other devices what you want them to know.
+3. `LoomSession` is the live connection.
+4. Your app owns everything above that line.
 
-Start with `LoomCloudKitConfiguration(containerIdentifier: "iCloud.com.yourapp.container")` and customize the record type names only if your app needs different schema names.
+That split is what keeps Loom reusable instead of turning it into someone else's app framework.
 
-## Documentation
+## Requirements
 
-- [API docs](https://ethanlipnik.github.io/Loom/documentation/loom/)
+- Swift 6.2+
+- macOS 14+
+- iOS 17.4+
+- visionOS 26+
+
+## Learn more
+
+If you want the deeper material, go to the docs:
+
+- [Documentation](https://ethanlipnik.github.io/Loom/documentation/loom/)
 - [Architecture notes](Architecture.md)
 
 ## Development
