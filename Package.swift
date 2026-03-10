@@ -36,6 +36,10 @@ let package = Package(
     ],
     targets: [
         .target(
+            name: "CLoomShellSupport",
+            publicHeadersPath: "include"
+        ),
+        .target(
             name: "Loom",
             dependencies: [
                 .product(name: "NIOCore", package: "swift-nio"),
@@ -51,6 +55,7 @@ let package = Package(
         .target(
             name: "LoomShell",
             dependencies: [
+                "CLoomShellSupport",
                 "Loom",
                 .product(name: "NIOCore", package: "swift-nio"),
                 .product(name: "NIOPosix", package: "swift-nio"),

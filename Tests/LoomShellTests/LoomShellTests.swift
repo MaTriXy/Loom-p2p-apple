@@ -311,13 +311,108 @@ struct LoomShellTests {
         }))
         #expect(events.contains(where: { event in
             if case let .stdout(data) = event {
-                return String(decoding: data, as: UTF8.self).contains("loom-shell-host")
+                let output = String(decoding: data, as: UTF8.self)
+                return output.contains("loom-shell-host")
+                    && !output.contains("can't set tty pgrp")
             }
             return false
         }))
         #expect(events.contains(where: { event in
             if case let .exit(exit) = event {
                 return exit.exitCode == 7
+            }
+            return false
+        }))
+    }
+
+    @Test("Local PTY host starts interactive login shell without tty job-control warnings")
+    func localHostStartsInteractiveShellWithoutTTYWarning() async throws {
+        guard ProcessInfo.processInfo.environment["LOOM_RUN_SHELL_INTEGRATION"] == "1" else {
+            return
+        }
+
+        let host = LoomLocalShellHost()
+        let hostedSession = try await host.startSession(
+            request: LoomShellSessionRequest(
+                terminalType: "xterm-256color",
+                columns: 80,
+                rows: 24
+            )
+        )
+
+        try await hostedSession.sendStdin(
+            Data("printf '__loom_interactive_ready__\\n'; exit 0\n".utf8)
+        )
+
+        let events = try await withTimeout(seconds: 5) {
+            var collected: [LoomShellEvent] = []
+            for await event in hostedSession.events {
+                collected.append(event)
+                if case .exit = event {
+                    break
+                }
+            }
+            return collected
+        }
+
+        await hostedSession.close()
+
+        let output = events.reduce(into: "") { partialResult, event in
+            if case let .stdout(data) = event {
+                partialResult += String(decoding: data, as: UTF8.self)
+            }
+        }
+
+        #expect(output.contains("__loom_interactive_ready__"))
+        #expect(!output.contains("can't set tty pgrp"))
+        #expect(events.contains(where: { event in
+            if case let .exit(exit) = event {
+                return exit.exitCode == 0
+            }
+            return false
+        }))
+    }
+
+    @Test("Local PTY host runs commands inside an interactive login zsh")
+    func localHostCommandUsesInteractiveLoginShell() async throws {
+        guard ProcessInfo.processInfo.environment["LOOM_RUN_SHELL_INTEGRATION"] == "1" else {
+            return
+        }
+
+        let host = LoomLocalShellHost()
+        let hostedSession = try await host.startSession(
+            request: LoomShellSessionRequest(
+                command: #"print -r -- "__loom_flags__:$options[login]:$options[interactive]"; exit 0"#,
+                environment: ["SHELL": "/bin/zsh"],
+                terminalType: "xterm-256color",
+                columns: 80,
+                rows: 24
+            )
+        )
+
+        let events = try await withTimeout(seconds: 5) {
+            var collected: [LoomShellEvent] = []
+            for await event in hostedSession.events {
+                collected.append(event)
+                if case .exit = event {
+                    break
+                }
+            }
+            return collected
+        }
+
+        await hostedSession.close()
+
+        let output = events.reduce(into: "") { partialResult, event in
+            if case let .stdout(data) = event {
+                partialResult += String(decoding: data, as: UTF8.self)
+            }
+        }
+
+        #expect(output.contains("__loom_flags__:on:on"))
+        #expect(events.contains(where: { event in
+            if case let .exit(exit) = event {
+                return exit.exitCode == 0
             }
             return false
         }))
