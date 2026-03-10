@@ -232,8 +232,9 @@ That split is what keeps Loom reusable instead of turning it into someone else's
 
 If you want the deeper material, go to the docs:
 
-- [Documentation](https://ethanlipnik.github.io/Loom/documentation/loom/)
-- `LoomShell` docs in the package catalog under the `LoomShell` product
+- [Loom Documentation](https://ethanlipnik.github.io/Loom/documentation/loom/)
+- [LoomShell Documentation](https://ethanlipnik.github.io/Loom/documentation/loomshell/)
+- [Build A Shell App On Loom](https://ethanlipnik.github.io/Loom/documentation/loomshell/build-a-shell-app-on-loom)
 - [Architecture notes](Architecture.md)
 
 ## Development

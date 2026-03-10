@@ -28,6 +28,7 @@ if [[ -z "$SYMBOLGRAPH_DIR" ]]; then
 fi
 LOOM_SYMBOLGRAPH="$SYMBOLGRAPH_DIR/Loom.symbols.json"
 LOOM_CLOUDKIT_SYMBOLGRAPH="$SYMBOLGRAPH_DIR/LoomCloudKit.symbols.json"
+LOOM_SHELL_SYMBOLGRAPH="$SYMBOLGRAPH_DIR/LoomShell.symbols.json"
 
 if [[ ! -f "$LOOM_SYMBOLGRAPH" ]]; then
   cat "$DUMP_STDOUT"
@@ -53,14 +54,31 @@ cp "$LOOM_SYMBOLGRAPH" "$SYMBOLGRAPH_FILTER_DIR/"
 if [[ -f "$LOOM_CLOUDKIT_SYMBOLGRAPH" ]]; then
   cp "$LOOM_CLOUDKIT_SYMBOLGRAPH" "$SYMBOLGRAPH_FILTER_DIR/"
 fi
+if [[ -f "$LOOM_SHELL_SYMBOLGRAPH" ]]; then
+  cp "$LOOM_SHELL_SYMBOLGRAPH" "$SYMBOLGRAPH_FILTER_DIR/"
+else
+  cat "$DUMP_STDOUT"
+  cat "$DUMP_STDERR" >&2
+  echo "Expected public LoomShell symbol graph at '$LOOM_SHELL_SYMBOLGRAPH' but it was not produced." >&2
+  exit 1
+fi
 
-xcrun docc convert \
-  "$ROOT_DIR/Sources/Loom/Loom.docc" \
-  --additional-symbol-graph-dir "$SYMBOLGRAPH_FILTER_DIR" \
-  --output-dir "$OUTPUT_PATH" \
-  --transform-for-static-hosting \
-  --hosting-base-path "$HOSTING_BASE_PATH" \
-  --fallback-display-name Loom \
-  --fallback-bundle-identifier loom.Loom
+convert_catalog() {
+  local catalog_path="$1"
+  local display_name="$2"
+  local bundle_identifier="$3"
+
+  xcrun docc convert \
+    "$catalog_path" \
+    --additional-symbol-graph-dir "$SYMBOLGRAPH_FILTER_DIR" \
+    --output-dir "$OUTPUT_PATH" \
+    --transform-for-static-hosting \
+    --hosting-base-path "$HOSTING_BASE_PATH" \
+    --fallback-display-name "$display_name" \
+    --fallback-bundle-identifier "$bundle_identifier"
+}
+
+convert_catalog "$ROOT_DIR/Sources/Loom/Loom.docc" Loom loom.Loom
+convert_catalog "$ROOT_DIR/Sources/LoomShell/LoomShell.docc" LoomShell loom.LoomShell
 
 touch "$OUTPUT_PATH/.nojekyll"
