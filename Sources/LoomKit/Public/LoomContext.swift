@@ -32,8 +32,8 @@ public final class LoomContext {
 
     private let store: LoomStore
     private let incomingConnectionsContinuation: AsyncStream<LoomConnectionHandle>.Continuation
-    nonisolated(unsafe) private var snapshotTask: Task<Void, Never>?
-    nonisolated(unsafe) private var incomingConnectionsTask: Task<Void, Never>?
+    private var snapshotTask: Task<Void, Never>?
+    private var incomingConnectionsTask: Task<Void, Never>?
 
     init(store: LoomStore) {
         self.store = store
@@ -65,9 +65,11 @@ public final class LoomContext {
     }
 
     deinit {
-        snapshotTask?.cancel()
-        incomingConnectionsTask?.cancel()
-        incomingConnectionsContinuation.finish()
+        MainActor.assumeIsolated {
+            snapshotTask?.cancel()
+            incomingConnectionsTask?.cancel()
+            incomingConnectionsContinuation.finish()
+        }
     }
 
     /// Starts the shared LoomKit runtime if needed.

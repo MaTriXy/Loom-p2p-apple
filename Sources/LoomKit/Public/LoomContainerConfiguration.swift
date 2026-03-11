@@ -8,6 +8,7 @@
 import Foundation
 import Loom
 import LoomCloudKit
+import LoomHost
 
 /// Trust behavior used by the SwiftUI-first LoomKit container runtime.
 public enum LoomTrustMode: String, Codable, Sendable {
@@ -34,6 +35,8 @@ public struct LoomContainerConfiguration: Sendable {
     public let cloudKit: LoomCloudKitConfiguration?
     /// Optional relay configuration used for remote hosting and remote joins.
     public let relay: LoomRelayConfiguration?
+    /// Optional macOS shared-host configuration used to share one Loom runtime across App Group apps.
+    public let sharedHost: LoomSharedHostConfiguration?
     /// Trust policy applied when evaluating nearby and CloudKit-backed peers.
     public let trust: LoomTrustMode
     /// Enables Bonjour peer-to-peer discovery when available on the platform.
@@ -58,6 +61,7 @@ public struct LoomContainerConfiguration: Sendable {
         deviceIDSuiteName: String? = nil,
         cloudKit: LoomCloudKitConfiguration? = nil,
         relay: LoomRelayConfiguration? = nil,
+        sharedHost: LoomSharedHostConfiguration? = nil,
         trust: LoomTrustMode = .manualOnly,
         enablePeerToPeer: Bool = true,
         advertisementMetadata: [String: String] = [:],
@@ -72,6 +76,7 @@ public struct LoomContainerConfiguration: Sendable {
         self.deviceIDSuiteName = deviceIDSuiteName
         self.cloudKit = cloudKit
         self.relay = relay
+        self.sharedHost = sharedHost
         self.trust = trust
         self.enablePeerToPeer = enablePeerToPeer
         self.advertisementMetadata = advertisementMetadata

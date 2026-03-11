@@ -140,7 +140,7 @@ public struct LoomQuery<Value>: DynamicProperty {
                 if lhs.name != rhs.name {
                     return lhs.name < rhs.name
                 }
-                return lhs.id.uuidString < rhs.id.uuidString
+                return lhs.id.rawValue < rhs.id.rawValue
 
             case .deviceType:
                 if lhs.deviceType.rawValue != rhs.deviceType.rawValue {

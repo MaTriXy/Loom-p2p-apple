@@ -11,7 +11,7 @@ import Network
 /// Represents a discovered peer on the network.
 public struct LoomPeer: Identifiable, Hashable, Sendable {
     /// Unique identifier for this peer.
-    public let id: UUID
+    public let id: LoomPeerID
 
     /// Display name advertised by the peer.
     public let name: String
@@ -25,8 +25,18 @@ public struct LoomPeer: Identifiable, Hashable, Sendable {
     /// Discovery advertisement published by the peer.
     public let advertisement: LoomPeerAdvertisement
 
+    /// Convenience access to the host device backing this peer.
+    public var deviceID: UUID {
+        id.deviceID
+    }
+
+    /// Optional app identifier when the peer was synthesized from a shared host catalog.
+    public var appID: String? {
+        id.appID
+    }
+
     public init(
-        id: UUID,
+        id: LoomPeerID,
         name: String,
         deviceType: DeviceType,
         endpoint: NWEndpoint,
@@ -37,6 +47,39 @@ public struct LoomPeer: Identifiable, Hashable, Sendable {
         self.deviceType = deviceType
         self.endpoint = endpoint
         self.advertisement = advertisement
+    }
+
+    public init(
+        id: UUID,
+        appID: String? = nil,
+        name: String,
+        deviceType: DeviceType,
+        endpoint: NWEndpoint,
+        advertisement: LoomPeerAdvertisement
+    ) {
+        self.init(
+            id: LoomPeerID(deviceID: id, appID: appID),
+            name: name,
+            deviceType: deviceType,
+            endpoint: endpoint,
+            advertisement: advertisement
+        )
+    }
+
+    public init(
+        id: UUID,
+        name: String,
+        deviceType: DeviceType,
+        endpoint: NWEndpoint,
+        advertisement: LoomPeerAdvertisement
+    ) {
+        self.init(
+            id: LoomPeerID(deviceID: id),
+            name: name,
+            deviceType: deviceType,
+            endpoint: endpoint,
+            advertisement: advertisement
+        )
     }
 
     public func hash(into hasher: inout Hasher) {

@@ -8,6 +8,7 @@
 import Foundation
 import Loom
 import LoomCloudKit
+import LoomHost
 
 /// Shared LoomKit runtime container modeled after SwiftData's `ModelContainer`.
 @MainActor
@@ -36,6 +37,7 @@ public final class LoomContainer {
             deviceIDSuiteName: configuration.deviceIDSuiteName,
             cloudKit: configuration.cloudKit,
             relay: configuration.relay,
+            sharedHost: configuration.sharedHost,
             trust: configuration.trust,
             enablePeerToPeer: configuration.enablePeerToPeer,
             advertisementMetadata: configuration.advertisementMetadata,
@@ -85,6 +87,36 @@ public final class LoomContainer {
             relayClient: relayClient,
             policy: configuration.directConnectionPolicy
         )
+        let bootstrapMetadataProvider = self.configuration.bootstrapMetadataProvider
+        let hostAdvertisementMetadata = self.configuration.advertisementMetadata
+        let hostSupportedFeatures = self.configuration.supportedFeatures
+        let hostClient: LoomHostClient?
+        #if os(macOS)
+        if let sharedHost = self.configuration.sharedHost {
+            hostClient = LoomHostClient(
+                configuration: sharedHost,
+                runtimeFactory: {
+                    LoomHostRuntimeDependencies(
+                        serviceName: trimmedServiceName,
+                        deviceID: deviceID,
+                        node: node,
+                        cloudKitManager: cloudKitManager,
+                        peerProvider: peerProvider,
+                        shareManager: shareManager,
+                        relayClient: relayClient,
+                        connectionCoordinator: connectionCoordinator,
+                        bootstrapMetadataProvider: bootstrapMetadataProvider,
+                        hostAdvertisementMetadata: hostAdvertisementMetadata,
+                        hostSupportedFeatures: hostSupportedFeatures
+                    )
+                }
+            )
+        } else {
+            hostClient = nil
+        }
+        #else
+        let hostClient: LoomHostClient? = nil
+        #endif
         store = LoomStore(
             configuration: self.configuration,
             deviceID: deviceID,
@@ -94,7 +126,8 @@ public final class LoomContainer {
             peerProvider: peerProvider,
             shareManager: shareManager,
             relayClient: relayClient,
-            connectionCoordinator: connectionCoordinator
+            connectionCoordinator: connectionCoordinator,
+            hostClient: hostClient
         )
         mainContext = LoomContext(store: store)
     }

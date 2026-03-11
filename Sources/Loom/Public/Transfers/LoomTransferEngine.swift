@@ -112,7 +112,7 @@ public final class LoomIncomingTransfer: @unchecked Sendable {
 /// Generic resumable bulk object transfer layered on an authenticated Loom session.
 public actor LoomTransferEngine {
     /// Authenticated Loom session used for encrypted control and data streams.
-    public let session: LoomAuthenticatedSession
+    public let session: any LoomSessionProtocol
     /// Transfer scheduling configuration used by the engine.
     public let configuration: LoomTransferConfiguration
     /// Async stream of remote transfer offers that arrive on the session.
@@ -128,7 +128,7 @@ public actor LoomTransferEngine {
 
     /// Creates a transfer engine bound to one authenticated Loom session.
     public init(
-        session: LoomAuthenticatedSession,
+        session: any LoomSessionProtocol,
         configuration: LoomTransferConfiguration = .default
     ) {
         self.session = session

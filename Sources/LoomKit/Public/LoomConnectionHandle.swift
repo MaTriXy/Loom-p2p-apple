@@ -16,7 +16,7 @@ public actor LoomConnectionHandle {
     /// Snapshot of the peer this handle is connected to.
     public let peer: LoomPeerSnapshot
     /// Underlying authenticated Loom session for advanced escape-hatch use.
-    public let session: LoomAuthenticatedSession
+    public let session: any LoomSessionProtocol
     /// Transfer engine bound to the authenticated session.
     public let transferEngine: LoomTransferEngine
 
@@ -45,7 +45,7 @@ public actor LoomConnectionHandle {
     init(
         id: UUID,
         peer: LoomPeerSnapshot,
-        session: LoomAuthenticatedSession,
+        session: any LoomSessionProtocol,
         transferConfiguration: LoomTransferConfiguration,
         onStateChanged: @escaping @Sendable (UUID, LoomConnectionSnapshot.State, String?) async -> Void,
         onTransferChanged: @escaping @Sendable (LoomTransferSnapshot) async -> Void,

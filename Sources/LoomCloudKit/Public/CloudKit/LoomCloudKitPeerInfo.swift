@@ -12,7 +12,7 @@ import Loom
 
 /// Represents a peer stored in CloudKit.
 public struct LoomCloudKitPeerInfo: Identifiable, Hashable, Sendable {
-    public let id: UUID
+    public let id: LoomPeerID
     public let name: String
     public let deviceType: DeviceType
     public let advertisement: LoomPeerAdvertisement
@@ -25,8 +25,16 @@ public struct LoomCloudKitPeerInfo: Identifiable, Hashable, Sendable {
     public let relaySessionID: String?
     public let bootstrapMetadata: LoomBootstrapMetadata?
 
+    public var deviceID: UUID {
+        id.deviceID
+    }
+
+    public var appID: String? {
+        id.appID
+    }
+
     public init(
-        id: UUID,
+        id: LoomPeerID,
         name: String,
         deviceType: DeviceType,
         advertisement: LoomPeerAdvertisement,
@@ -51,6 +59,37 @@ public struct LoomCloudKitPeerInfo: Identifiable, Hashable, Sendable {
         self.remoteAccessEnabled = remoteAccessEnabled
         self.relaySessionID = relaySessionID
         self.bootstrapMetadata = bootstrapMetadata
+    }
+
+    public init(
+        id: UUID,
+        appID: String? = nil,
+        name: String,
+        deviceType: DeviceType,
+        advertisement: LoomPeerAdvertisement,
+        lastSeen: Date,
+        ownerUserID: String?,
+        isShared: Bool,
+        recordID: String,
+        identityPublicKey: Data? = nil,
+        remoteAccessEnabled: Bool = false,
+        relaySessionID: String? = nil,
+        bootstrapMetadata: LoomBootstrapMetadata? = nil
+    ) {
+        self.init(
+            id: LoomPeerID(deviceID: id, appID: appID),
+            name: name,
+            deviceType: deviceType,
+            advertisement: advertisement,
+            lastSeen: lastSeen,
+            ownerUserID: ownerUserID,
+            isShared: isShared,
+            recordID: recordID,
+            identityPublicKey: identityPublicKey,
+            remoteAccessEnabled: remoteAccessEnabled,
+            relaySessionID: relaySessionID,
+            bootstrapMetadata: bootstrapMetadata
+        )
     }
 
     public func hash(into hasher: inout Hasher) {

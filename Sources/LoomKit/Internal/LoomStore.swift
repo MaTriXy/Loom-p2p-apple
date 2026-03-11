@@ -9,6 +9,7 @@ import CloudKit
 import Foundation
 import Loom
 import LoomCloudKit
+import LoomHost
 #if canImport(UIKit)
 import UIKit
 #endif
@@ -29,7 +30,7 @@ private struct ManagedConnection: Sendable {
 
 enum LoomStoreError: LocalizedError, Sendable {
     case invalidConfiguration(String)
-    case peerNotFound(UUID)
+    case peerNotFound(LoomPeerID)
     case relayUnavailable
     case cloudKitUnavailable
     case bootstrapMetadataUnavailable
@@ -70,6 +71,7 @@ actor LoomStore {
     private let shareManager: LoomCloudKitShareManager?
     private let relayClient: LoomRelayClient?
     private let connectionCoordinator: LoomConnectionCoordinator
+    private let hostClient: LoomHostClient?
     private let wakeOnLANClient: any LoomWakeOnLANClient
     private let bootstrapControlClient: any LoomBootstrapControlClient
     private let sshBootstrapClient: any LoomSSHBootstrapClient
@@ -81,15 +83,18 @@ actor LoomStore {
     private var lastErrorMessage: String?
     private var listeningPorts: [LoomTransportKind: UInt16] = [:]
     private var discoveryObserverToken: UUID?
-    private var localPeersByID: [UUID: LoomPeer] = [:]
-    private var localPeerLastSeen: [UUID: Date] = [:]
-    private var cloudPeersByID: [UUID: LoomCloudKitPeerInfo] = [:]
+    private var localPeersByID: [LoomPeerID: LoomPeer] = [:]
+    private var localPeerLastSeen: [LoomPeerID: Date] = [:]
+    private var cloudPeersByID: [LoomPeerID: LoomCloudKitPeerInfo] = [:]
     private var connections: [UUID: ManagedConnection] = [:]
     private var connectionSnapshots: [UUID: LoomConnectionSnapshot] = [:]
     private var transferSnapshots: [UUID: LoomTransferSnapshot] = [:]
     private var relayHeartbeatTask: Task<Void, Never>?
     private var currentRemoteSessionID: String?
     private var currentPublicHostForTCP: String?
+    private var hostSnapshot: LoomHostStateSnapshot?
+    private var hostStateTask: Task<Void, Never>?
+    private var hostIncomingTask: Task<Void, Never>?
 
     init(
         configuration: LoomContainerConfiguration,
@@ -101,6 +106,7 @@ actor LoomStore {
         shareManager: LoomCloudKitShareManager?,
         relayClient: LoomRelayClient?,
         connectionCoordinator: LoomConnectionCoordinator,
+        hostClient: LoomHostClient? = nil,
         wakeOnLANClient: any LoomWakeOnLANClient = LoomDefaultWakeOnLANClient(),
         bootstrapControlClient: any LoomBootstrapControlClient = LoomDefaultBootstrapControlClient(),
         sshBootstrapClient: any LoomSSHBootstrapClient = LoomDefaultSSHBootstrapClient()
@@ -114,9 +120,11 @@ actor LoomStore {
         self.shareManager = shareManager
         self.relayClient = relayClient
         self.connectionCoordinator = connectionCoordinator
+        self.hostClient = hostClient
         self.wakeOnLANClient = wakeOnLANClient
         self.bootstrapControlClient = bootstrapControlClient
         self.sshBootstrapClient = sshBootstrapClient
+
     }
 
     func makeSnapshotStream() -> AsyncStream<LoomStoreSnapshot> {
@@ -130,6 +138,17 @@ actor LoomStore {
     func start() async throws {
         guard !isRunning else {
             return
+        }
+
+        if let hostClient {
+            do {
+                ensureHostObserversStarted()
+                try await hostClient.start()
+                await notifyStateChanged()
+                return
+            } catch {
+                await record(error)
+            }
         }
 
         do {
@@ -215,13 +234,21 @@ actor LoomStore {
         isRemoteHosting = false
 
         let activeConnections = Array(connections.values)
-        connections.removeAll()
-        connectionSnapshots.removeAll()
-        transferSnapshots.removeAll()
 
         for managedConnection in activeConnections {
             await managedConnection.handle.disconnect()
         }
+
+        if let relayClient {
+            let joinedRelaySessionIDs = Set(activeConnections.compactMap(\.relaySessionID))
+            for relaySessionID in joinedRelaySessionIDs {
+                try? await relayClient.leaveSession(sessionID: relaySessionID)
+            }
+        }
+
+        connections.removeAll()
+        connectionSnapshots.removeAll()
+        transferSnapshots.removeAll()
 
         if let discoveryObserverToken,
            let discovery = await MainActor.run(body: { node.discovery }) {
@@ -237,12 +264,29 @@ actor LoomStore {
         cloudPeersByID.removeAll()
         listeningPorts.removeAll()
 
+        if let hostClient {
+            await hostClient.stop()
+            hostSnapshot = nil
+            isRunning = false
+            isRemoteHosting = false
+            await notifyStateChanged()
+            return
+        }
+
         await node.stopAdvertising()
         isRunning = false
         await notifyStateChanged()
     }
 
     func refreshPeers() async {
+        if let hostClient {
+            do {
+                try await hostClient.refreshPeers()
+            } catch {
+                await record(error)
+            }
+            return
+        }
         if let discovery = await MainActor.run(body: { node.discovery }),
            isRunning {
             await MainActor.run {
@@ -253,6 +297,17 @@ actor LoomStore {
     }
 
     func connect(to peerSnapshot: LoomPeerSnapshot) async throws -> LoomConnectionHandle {
+        if let hostClient {
+            if !isRunning {
+                try await start()
+            }
+            let connection = try await hostClient.connect(to: peerSnapshot.id)
+            return await registerConnection(
+                session: connection.session,
+                peerSnapshot: snapshot(fromHostRecord: connection.descriptor.peer),
+                relaySessionID: connection.descriptor.peer.relaySessionID
+            )
+        }
         if !isRunning {
             try await start()
         }
@@ -273,13 +328,24 @@ actor LoomStore {
     }
 
     func connect(remoteSessionID: String) async throws -> LoomConnectionHandle {
-        if !isRunning {
-            try await start()
-        }
-
         let sessionID = remoteSessionID.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !sessionID.isEmpty else {
             throw LoomStoreError.invalidConfiguration("LoomKit remote session ID must not be empty.")
+        }
+
+        if let hostClient {
+            if !isRunning {
+                try await start()
+            }
+            let connection = try await hostClient.connect(remoteSessionID: sessionID)
+            return await registerConnection(
+                session: connection.session,
+                peerSnapshot: snapshot(fromHostRecord: connection.descriptor.peer),
+                relaySessionID: connection.descriptor.peer.relaySessionID
+            )
+        }
+        if !isRunning {
+            try await start()
         }
 
         let knownPeer = currentSnapshot().peers.first { $0.relaySessionID == sessionID }
@@ -301,6 +367,13 @@ actor LoomStore {
         sessionID: String,
         publicHostForTCP: String?
     ) async throws {
+        if let hostClient {
+            try await hostClient.startRemoteHosting(
+                sessionID: sessionID,
+                publicHostForTCP: publicHostForTCP
+            )
+            return
+        }
         try await startRemoteHosting(
             sessionID: sessionID,
             publicHostForTCP: publicHostForTCP,
@@ -309,6 +382,14 @@ actor LoomStore {
     }
 
     func stopRemoteHosting() async {
+        if let hostClient {
+            do {
+                try await hostClient.stopRemoteHosting()
+            } catch {
+                await record(error)
+            }
+            return
+        }
         relayHeartbeatTask?.cancel()
         relayHeartbeatTask = nil
 
@@ -476,11 +557,13 @@ actor LoomStore {
             listeningPorts: listeningPorts,
             publicHostForTCP: publicHostForTCP
         )
+        let advertisement = try await makeAdvertisement()
         try await relayClient.advertisePeerSession(
             sessionID: trimmedSessionID,
             peerID: deviceID,
             acceptingConnections: true,
-            peerCandidates: peerCandidates
+            peerCandidates: peerCandidates,
+            advertisement: advertisement
         )
 
         currentRemoteSessionID = trimmedSessionID
@@ -510,10 +593,12 @@ actor LoomStore {
                     listeningPorts: listeningPorts,
                     publicHostForTCP: currentPublicHostForTCP
                 )
+                let advertisement = try await self.makeAdvertisement()
                 try await relayClient.peerHeartbeat(
                     sessionID: sessionID,
                     acceptingConnections: true,
                     peerCandidates: peerCandidates,
+                    advertisement: advertisement,
                     ttlSeconds: 360
                 )
                 if let shareManager {
@@ -580,7 +665,7 @@ actor LoomStore {
         await peerProvider.fetchPeers()
         let cloudPeers = await MainActor.run {
             return (peerProvider.ownPeers + peerProvider.sharedPeers)
-                .filter { $0.id != deviceID }
+                .filter { $0.deviceID != deviceID }
         }
         cloudPeersByID = Dictionary(
             uniqueKeysWithValues: cloudPeers.map { ($0.id, $0) }
@@ -592,7 +677,7 @@ actor LoomStore {
         let now = Date()
         localPeersByID = Dictionary(
             uniqueKeysWithValues: peers
-                .filter { $0.id != deviceID }
+                .filter { $0.deviceID != deviceID }
                 .map { ($0.id, $0) }
         )
         localPeerLastSeen = Dictionary(
@@ -619,6 +704,19 @@ actor LoomStore {
             await record(error)
             await session.cancel()
         }
+    }
+
+    private func handleHostIncomingConnection(
+        _ connection: LoomHostClientConnection
+    ) async {
+        let peerSnapshot = snapshot(fromHostRecord: connection.descriptor.peer)
+        let handle = await registerConnection(
+            session: connection.session,
+            peerSnapshot: peerSnapshot,
+            relaySessionID: nil
+        )
+        incomingConnectionBroadcaster.yield(handle)
+        await notifyStateChanged()
     }
 
     private func connect(
@@ -666,7 +764,7 @@ actor LoomStore {
     }
 
     private func registerConnection(
-        session: LoomAuthenticatedSession,
+        session: any LoomSessionProtocol,
         peerSnapshot: LoomPeerSnapshot,
         relaySessionID: String?
     ) async -> LoomConnectionHandle {
@@ -716,7 +814,9 @@ actor LoomStore {
         guard let sessionContext = await session.context else {
             throw LoomStoreError.invalidConfiguration("LoomKit connected without authenticated session context.")
         }
-        if let currentPeerSnapshot = currentPeerSnapshot(for: sessionContext.peerIdentity.deviceID) {
+        if let currentPeerSnapshot = currentPeerSnapshot(
+            for: LoomPeerID(deviceID: sessionContext.peerIdentity.deviceID)
+        ) {
             return currentPeerSnapshot
         }
 
@@ -807,7 +907,7 @@ actor LoomStore {
 
     private func currentSnapshot() -> LoomStoreSnapshot {
         LoomStoreSnapshot(
-            peers: mergedPeers(),
+            peers: hostSnapshot.map { $0.peers.map(snapshot(fromHostRecord:)) } ?? mergedPeers(),
             connections: connectionSnapshots.values.sorted { lhs, rhs in
                 if lhs.connectedAt != rhs.connectedAt {
                     return lhs.connectedAt > rhs.connectedAt
@@ -820,9 +920,9 @@ actor LoomStore {
                 }
                 return lhs.id.uuidString < rhs.id.uuidString
             },
-            isRunning: isRunning,
-            isRemoteHosting: isRemoteHosting,
-            lastErrorMessage: lastErrorMessage
+            isRunning: hostSnapshot?.isRunning ?? isRunning,
+            isRemoteHosting: hostSnapshot?.isRemoteHosting ?? isRemoteHosting,
+            lastErrorMessage: lastErrorMessage ?? hostSnapshot?.lastErrorMessage
         )
     }
 
@@ -836,7 +936,7 @@ actor LoomStore {
         }
     }
 
-    private func currentPeerSnapshot(for peerID: UUID) -> LoomPeerSnapshot? {
+    private func currentPeerSnapshot(for peerID: LoomPeerID) -> LoomPeerSnapshot? {
         let localPeer = localPeersByID[peerID]
         let cloudPeer = cloudPeersByID[peerID]
         guard localPeer != nil || cloudPeer != nil else {
@@ -846,7 +946,7 @@ actor LoomStore {
         let deviceType = localPeer?.deviceType ?? cloudPeer?.deviceType ?? .unknown
         let advertisement = localPeer?.advertisement
             ?? cloudPeer?.advertisement
-            ?? LoomPeerAdvertisement(deviceID: peerID, deviceType: deviceType)
+            ?? LoomPeerAdvertisement(deviceID: peerID.deviceID, deviceType: deviceType)
         let bootstrapMetadata = LoomKitMetadataCodec.bootstrapMetadata(from: advertisement)
             ?? cloudPeer?.bootstrapMetadata
         var sources: [LoomPeerSource] = []
@@ -901,6 +1001,63 @@ actor LoomStore {
 
     private func notifyStateChanged() async {
         snapshotBroadcaster.yield(currentSnapshot())
+    }
+
+    private func handleHostStateChanged(_ snapshot: LoomHostStateSnapshot) async {
+        hostSnapshot = snapshot
+        isRunning = snapshot.isRunning
+        isRemoteHosting = snapshot.isRemoteHosting
+        if let message = snapshot.lastErrorMessage {
+            lastErrorMessage = message
+        }
+        await notifyStateChanged()
+    }
+
+    private func ensureHostObserversStarted() {
+        guard let hostClient else {
+            return
+        }
+        if hostStateTask == nil {
+            hostStateTask = Task { [weak self] in
+                guard let self else { return }
+                let snapshots = await hostClient.makeStateStream()
+                for await snapshot in snapshots {
+                    await self.handleHostStateChanged(snapshot)
+                }
+            }
+        }
+        if hostIncomingTask == nil {
+            hostIncomingTask = Task { [weak self] in
+                guard let self else { return }
+                let incomingConnections = await hostClient.makeIncomingConnectionStream()
+                for await connection in incomingConnections {
+                    await self.handleHostIncomingConnection(connection)
+                }
+            }
+        }
+    }
+
+    private func snapshot(fromHostRecord record: LoomHostPeerRecord) -> LoomPeerSnapshot {
+        LoomPeerSnapshot(
+            id: record.id,
+            name: record.name,
+            deviceType: record.deviceType,
+            sources: record.sources.map {
+                switch $0 {
+                case .nearby: .nearby
+                case .cloudKitOwn: .cloudKitOwn
+                case .cloudKitShared: .cloudKitShared
+                case .relay: .relay
+                }
+            },
+            isNearby: record.isNearby,
+            isShared: record.isShared,
+            remoteAccessEnabled: record.remoteAccessEnabled,
+            relaySessionID: record.relaySessionID,
+            advertisement: record.advertisement,
+            bootstrapMetadata: record.bootstrapMetadata,
+            lastSeen: record.lastSeen
+        )
     }
 
     private func record(_ error: Error) async {

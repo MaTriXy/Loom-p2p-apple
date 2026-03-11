@@ -106,6 +106,7 @@ public struct LoomRelayCandidate: Sendable, Codable, Hashable {
 public struct LoomRelayPresenceStatus: Sendable {
     public let exists: Bool
     public let acceptingConnections: Bool
+    public let advertisement: LoomPeerAdvertisement?
     public let peerCandidates: [LoomRelayCandidate]
     public let lockedToParticipantKeyID: String?
     public let expiresAt: Date?
@@ -125,6 +126,7 @@ public struct LoomRelayPresenceStatus: Sendable {
     public init(
         exists: Bool,
         acceptingConnections: Bool,
+        advertisement: LoomPeerAdvertisement? = nil,
         peerCandidates: [LoomRelayCandidate] = [],
         lockedToParticipantKeyID: String? = nil,
         expiresAt: Date? = nil,
@@ -133,6 +135,7 @@ public struct LoomRelayPresenceStatus: Sendable {
     ) {
         self.exists = exists
         self.acceptingConnections = acceptingConnections
+        self.advertisement = advertisement
         self.peerCandidates = peerCandidates
         self.lockedToParticipantKeyID = lockedToParticipantKeyID
         self.expiresAt = expiresAt
@@ -224,6 +227,7 @@ public final class LoomRelayClient {
         peerID: UUID,
         acceptingConnections: Bool,
         peerCandidates: [LoomRelayCandidate],
+        advertisement: LoomPeerAdvertisement? = nil,
         ttlSeconds: Int = 360
     )
     async throws {
@@ -232,6 +236,7 @@ public final class LoomRelayClient {
                 sessionID: sessionID,
                 acceptingConnections: acceptingConnections,
                 peerCandidates: peerCandidates,
+                advertisement: advertisement,
                 ttlSeconds: ttlSeconds
             )
             return
@@ -249,6 +254,7 @@ public final class LoomRelayClient {
                 peerID: peerID,
                 acceptingConnections: acceptingConnections,
                 peerCandidates: peerCandidates,
+                advertisement: advertisement,
                 ttlSeconds: ttlSeconds
             )
         } catch let error as LoomRelayError {
@@ -257,6 +263,7 @@ public final class LoomRelayClient {
                     sessionID: sessionID,
                     acceptingConnections: acceptingConnections,
                     peerCandidates: peerCandidates,
+                    advertisement: advertisement,
                     ttlSeconds: ttlSeconds
                 )
                 return
@@ -272,6 +279,7 @@ public final class LoomRelayClient {
         sessionID: String,
         acceptingConnections: Bool? = nil,
         peerCandidates: [LoomRelayCandidate]? = nil,
+        advertisement: LoomPeerAdvertisement? = nil,
         ttlSeconds: Int? = nil
     )
     async throws {
@@ -284,6 +292,9 @@ public final class LoomRelayClient {
         }
         if let ttlSeconds {
             body["ttlSeconds"] = ttlSeconds
+        }
+        if let advertisementBlob = encodeAdvertisementBlob(advertisement) {
+            body["advertisementBlob"] = advertisementBlob
         }
         let bodyData = try JSONSerialization.data(withJSONObject: body)
         _ = try await sendSignedRequest(
@@ -359,6 +370,7 @@ public final class LoomRelayClient {
         return LoomRelayPresenceStatus(
             exists: exists,
             acceptingConnections: object["remoteEnabled"] as? Bool ?? object["acceptingConnections"] as? Bool ?? false,
+            advertisement: parseAdvertisementBlob(object["advertisementBlob"]),
             peerCandidates: parseCandidates(object["peerCandidates"] ?? object["hostCandidates"]),
             lockedToParticipantKeyID: object["lockedToParticipantKeyID"] as? String ?? object["lockedToClientKeyID"] as? String,
             expiresAt: dateFromMilliseconds(object["expiresAtMs"]),
@@ -372,15 +384,19 @@ public final class LoomRelayClient {
         peerID: UUID,
         acceptingConnections: Bool,
         peerCandidates: [LoomRelayCandidate],
+        advertisement: LoomPeerAdvertisement?,
         ttlSeconds: Int
     )
     async throws {
-        let body: [String: Any] = [
+        var body: [String: Any] = [
             "hostID": peerID.uuidString.lowercased(),
             "ttlSeconds": ttlSeconds,
             "remoteEnabled": acceptingConnections,
             "hostCandidates": encodeCandidates(peerCandidates),
         ]
+        if let advertisementBlob = encodeAdvertisementBlob(advertisement) {
+            body["advertisementBlob"] = advertisementBlob
+        }
         let bodyData = try JSONSerialization.data(withJSONObject: body)
         _ = try await sendSignedRequest(
             sessionID: sessionID,
@@ -526,6 +542,14 @@ public final class LoomRelayClient {
             ]
         }
     }
+
+    private func encodeAdvertisementBlob(_ advertisement: LoomPeerAdvertisement?) -> String? {
+        guard let advertisement,
+              let data = try? JSONEncoder().encode(advertisement) else {
+            return nil
+        }
+        return data.base64EncodedString()
+    }
 }
 
 private func parseErrorPayload(_ data: Data) -> (errorCode: String?, detail: String?) {
@@ -582,4 +606,12 @@ private func parseCandidates(_ rawValue: Any?) -> [LoomRelayCandidate] {
 
         return nil
     }
+}
+
+private func parseAdvertisementBlob(_ rawValue: Any?) -> LoomPeerAdvertisement? {
+    guard let encoded = rawValue as? String,
+          let data = Data(base64Encoded: encoded) else {
+        return nil
+    }
+    return try? JSONDecoder().decode(LoomPeerAdvertisement.self, from: data)
 }

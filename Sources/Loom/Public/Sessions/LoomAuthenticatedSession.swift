@@ -9,7 +9,7 @@ import Foundation
 import Network
 
 /// Lifecycle state for an authenticated Loom session.
-public enum LoomAuthenticatedSessionState: Sendable, Equatable {
+public enum LoomAuthenticatedSessionState: Sendable, Equatable, Codable {
     case idle
     case handshaking
     case ready
@@ -18,19 +18,22 @@ public enum LoomAuthenticatedSessionState: Sendable, Equatable {
 }
 
 /// Negotiated session metadata produced by the Loom handshake.
-public struct LoomAuthenticatedSessionContext: Sendable {
+public struct LoomAuthenticatedSessionContext: Sendable, Codable, Equatable {
     public let peerIdentity: LoomPeerIdentity
+    public let peerAdvertisement: LoomPeerAdvertisement
     public let trustEvaluation: LoomTrustEvaluation
     public let transportKind: LoomTransportKind
     public let negotiatedFeatures: [String]
 
     public init(
         peerIdentity: LoomPeerIdentity,
+        peerAdvertisement: LoomPeerAdvertisement,
         trustEvaluation: LoomTrustEvaluation,
         transportKind: LoomTransportKind,
         negotiatedFeatures: [String]
     ) {
         self.peerIdentity = peerIdentity
+        self.peerAdvertisement = peerAdvertisement
         self.trustEvaluation = trustEvaluation
         self.transportKind = transportKind
         self.negotiatedFeatures = negotiatedFeatures
@@ -45,41 +48,30 @@ public final class LoomMultiplexedStream: @unchecked Sendable, Hashable {
 
     private let lock = NSLock()
     private var continuation: AsyncStream<Data>.Continuation?
-    private let sendHandler: @Sendable (LoomSessionStreamEnvelope) async throws -> Void
+    private let sendHandler: @Sendable (Data) async throws -> Void
+    private let closeHandler: @Sendable () async throws -> Void
 
-    fileprivate init(
+    package init(
         id: UInt16,
         label: String?,
-        sendHandler: @escaping @Sendable (LoomSessionStreamEnvelope) async throws -> Void
+        sendHandler: @escaping @Sendable (Data) async throws -> Void,
+        closeHandler: @escaping @Sendable () async throws -> Void
     ) {
         self.id = id
         self.label = label
         self.sendHandler = sendHandler
+        self.closeHandler = closeHandler
         let (stream, continuation) = AsyncStream.makeStream(of: Data.self)
         incomingBytes = stream
         self.continuation = continuation
     }
 
     public func send(_ data: Data) async throws {
-        try await sendHandler(
-            LoomSessionStreamEnvelope(
-                kind: .data,
-                streamID: id,
-                label: nil,
-                payload: data
-            )
-        )
+        try await sendHandler(data)
     }
 
     public func close() async throws {
-        try await sendHandler(
-            LoomSessionStreamEnvelope(
-                kind: .close,
-                streamID: id,
-                label: nil,
-                payload: nil
-            )
-        )
+        try await closeHandler()
         finishInbound()
     }
 
@@ -108,7 +100,7 @@ public final class LoomMultiplexedStream: @unchecked Sendable, Hashable {
 }
 
 /// Authenticated Loom session that provides generic multiplexed streams.
-public actor LoomAuthenticatedSession {
+public actor LoomAuthenticatedSession: LoomSessionProtocol {
     public let rawSession: LoomSession
     public let role: LoomSessionRole
     public let transportKind: LoomTransportKind
@@ -224,6 +216,7 @@ public actor LoomAuthenticatedSession {
         )
         let context = LoomAuthenticatedSessionContext(
             peerIdentity: peerIdentity,
+            peerAdvertisement: validatedHello.hello.advertisement,
             trustEvaluation: trustEvaluation,
             transportKind: transportKind,
             negotiatedFeatures: negotiatedFeatures
@@ -271,7 +264,7 @@ public actor LoomAuthenticatedSession {
         return stream
     }
 
-    public func cancel() {
+    public func cancel() async {
         updateState(.cancelled)
         readTask?.cancel()
         for stream in streams.values {
@@ -330,15 +323,37 @@ public actor LoomAuthenticatedSession {
     }
 
     private func makeStream(id: UInt16, label: String?) -> LoomMultiplexedStream {
-        LoomMultiplexedStream(id: id, label: label) { [weak self] envelope in
-            guard let self else {
-                throw LoomError.protocolError("Authenticated Loom session no longer exists.")
+        LoomMultiplexedStream(
+            id: id,
+            label: label,
+            sendHandler: { [weak self] data in
+                guard let self else {
+                    throw LoomError.protocolError("Authenticated Loom session no longer exists.")
+                }
+                try await self.sendEnvelope(
+                    LoomSessionStreamEnvelope(
+                        kind: .data,
+                        streamID: id,
+                        label: nil,
+                        payload: data
+                    )
+                )
+            },
+            closeHandler: { [weak self] in
+                guard let self else {
+                    throw LoomError.protocolError("Authenticated Loom session no longer exists.")
+                }
+                try await self.sendEnvelope(
+                    LoomSessionStreamEnvelope(
+                        kind: .close,
+                        streamID: id,
+                        label: nil,
+                        payload: nil
+                    )
+                )
+                await self.removeStream(id: id)
             }
-            try await self.sendEnvelope(envelope)
-            if envelope.kind == .close {
-                await self.removeStream(id: envelope.streamID)
-            }
-        }
+        )
     }
 
     private func removeStream(id: UInt16) {

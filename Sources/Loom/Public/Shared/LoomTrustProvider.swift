@@ -12,7 +12,7 @@ import Foundation
 // MARK: - Trust Decision
 
 /// Result of trust evaluation for a connecting peer.
-public enum LoomTrustDecision: Sendable, Equatable {
+public enum LoomTrustDecision: Sendable, Equatable, Codable {
     /// Auto-approve connection without prompting user.
     case trusted
 
@@ -37,7 +37,7 @@ public enum LoomTrustDecision: Sendable, Equatable {
 }
 
 /// Trust evaluation metadata used by peer connection flows.
-public struct LoomTrustEvaluation: Sendable, Equatable {
+public struct LoomTrustEvaluation: Sendable, Equatable, Codable {
     /// Final trust decision for the incoming peer.
     public let decision: LoomTrustDecision
 
@@ -61,7 +61,7 @@ public struct LoomTrustEvaluation: Sendable, Equatable {
 ///
 /// Contains all identifying information about a connecting peer, including
 /// the optional iCloud user ID for same-account and friend-share trust evaluation.
-public struct LoomPeerIdentity: Sendable {
+public struct LoomPeerIdentity: Sendable, Codable, Equatable {
     /// Unique device identifier.
     public let deviceID: UUID
 

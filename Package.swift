@@ -33,6 +33,10 @@ let package = Package(
             name: "LoomKit",
             targets: ["LoomKit"]
         ),
+        .library(
+            name: "LoomHost",
+            targets: ["LoomHost"]
+        ),
     ],
     dependencies: [
         .package(url: "https://github.com/apple/swift-nio.git", from: "2.81.0"),
@@ -72,6 +76,14 @@ let package = Package(
             dependencies: [
                 "Loom",
                 "LoomCloudKit",
+                "LoomHost",
+            ]
+        ),
+        .target(
+            name: "LoomHost",
+            dependencies: [
+                "Loom",
+                "LoomCloudKit",
             ]
         ),
         .testTarget(
@@ -89,6 +101,10 @@ let package = Package(
         .testTarget(
             name: "LoomKitTests",
             dependencies: ["LoomKit"]
+        ),
+        .testTarget(
+            name: "LoomHostTests",
+            dependencies: ["LoomHost"]
         ),
     ]
 )

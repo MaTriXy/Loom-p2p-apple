@@ -90,6 +90,57 @@ struct LoomDiscoveryTests {
     }
 
     @MainActor
+    @Test("Discovery expands one shared host advertisement into multiple app-shaped peers")
+    func discoveryExpandsSharedHostCatalog() throws {
+        let deviceID = UUID()
+        let discovery = LoomDiscovery()
+        let catalog = LoomHostCatalog(
+            entries: [
+                LoomHostCatalogEntry(
+                    appID: "com.example.alpha",
+                    displayName: "Alpha",
+                    metadata: ["alpha": "1"],
+                    supportedFeatures: ["alpha-feature"]
+                ),
+                LoomHostCatalogEntry(
+                    appID: "com.example.beta",
+                    displayName: "Beta",
+                    metadata: ["beta": "1"],
+                    supportedFeatures: ["beta-feature"]
+                ),
+            ]
+        )
+        let metadata = try LoomHostCatalogCodec.addingCatalog(catalog, to: [:])
+        let peer = LoomPeer(
+            id: deviceID,
+            name: "Shared Host",
+            deviceType: .mac,
+            endpoint: .hostPort(
+                host: "127.0.0.1",
+                port: NWEndpoint.Port(rawValue: 9900)!
+            ),
+            advertisement: LoomPeerAdvertisement(
+                deviceID: deviceID,
+                deviceType: .mac,
+                metadata: metadata
+            )
+        )
+
+        discovery.upsertPeerForTesting(peer)
+
+        #expect(discovery.discoveredPeers.count == 2)
+        #expect(discovery.discoveredPeers.map(\.id).contains(LoomPeerID(deviceID: deviceID, appID: "com.example.alpha")))
+        #expect(discovery.discoveredPeers.map(\.id).contains(LoomPeerID(deviceID: deviceID, appID: "com.example.beta")))
+
+        let alphaPeer = try #require(
+            discovery.discoveredPeers.first { $0.appID == "com.example.alpha" }
+        )
+        #expect(alphaPeer.name == "Alpha")
+        #expect(alphaPeer.advertisement.metadata["alpha"] == "1")
+        #expect(alphaPeer.advertisement.metadata[LoomHostCatalogCodec.metadataKey] == nil)
+    }
+
+    @MainActor
     private func makePeer(
         id: UUID,
         name: String,

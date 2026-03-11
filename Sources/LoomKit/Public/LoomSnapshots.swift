@@ -38,8 +38,8 @@ public enum LoomPeerSource: String, Codable, CaseIterable, Hashable, Sendable {
 
 /// UI-friendly peer snapshot exposed by ``LoomQuery`` and ``LoomContext``.
 public struct LoomPeerSnapshot: Identifiable, Hashable, Sendable {
-    /// Stable logical device identifier.
-    public let id: UUID
+    /// Stable logical peer identifier.
+    public let id: LoomPeerID
     /// Display name shown in peer pickers and status views.
     public let name: String
     /// Coarse-grained device family for the peer.
@@ -61,9 +61,19 @@ public struct LoomPeerSnapshot: Identifiable, Hashable, Sendable {
     /// Timestamp of the most recent observation for this peer.
     public let lastSeen: Date
 
+    /// Convenience access to the host device backing this peer.
+    public var deviceID: UUID {
+        id.deviceID
+    }
+
+    /// Optional app identifier when the peer was synthesized from a shared host.
+    public var appID: String? {
+        id.appID
+    }
+
     /// Creates a UI snapshot for one logical peer merged across nearby and CloudKit sources.
     public init(
-        id: UUID,
+        id: LoomPeerID,
         name: String,
         deviceType: DeviceType,
         sources: [LoomPeerSource],
@@ -87,6 +97,35 @@ public struct LoomPeerSnapshot: Identifiable, Hashable, Sendable {
         self.bootstrapMetadata = bootstrapMetadata
         self.lastSeen = lastSeen
     }
+
+    public init(
+        id: UUID,
+        appID: String? = nil,
+        name: String,
+        deviceType: DeviceType,
+        sources: [LoomPeerSource],
+        isNearby: Bool,
+        isShared: Bool,
+        remoteAccessEnabled: Bool,
+        relaySessionID: String?,
+        advertisement: LoomPeerAdvertisement,
+        bootstrapMetadata: LoomBootstrapMetadata?,
+        lastSeen: Date
+    ) {
+        self.init(
+            id: LoomPeerID(deviceID: id, appID: appID),
+            name: name,
+            deviceType: deviceType,
+            sources: sources,
+            isNearby: isNearby,
+            isShared: isShared,
+            remoteAccessEnabled: remoteAccessEnabled,
+            relaySessionID: relaySessionID,
+            advertisement: advertisement,
+            bootstrapMetadata: bootstrapMetadata,
+            lastSeen: lastSeen
+        )
+    }
 }
 
 /// UI-friendly active-connection snapshot exposed by ``LoomQuery`` and ``LoomContext``.
@@ -108,7 +147,7 @@ public struct LoomConnectionSnapshot: Identifiable, Hashable, Sendable {
     /// Stable LoomKit connection identifier.
     public let id: UUID
     /// Peer identifier associated with the connection.
-    public let peerID: UUID
+    public let peerID: LoomPeerID
     /// Peer name captured when the connection snapshot was produced.
     public let peerName: String
     /// High-level lifecycle state for UI presentation.
@@ -123,7 +162,7 @@ public struct LoomConnectionSnapshot: Identifiable, Hashable, Sendable {
     /// Creates a connection snapshot suitable for `@LoomQuery` and list rendering.
     public init(
         id: UUID,
-        peerID: UUID,
+        peerID: LoomPeerID,
         peerName: String,
         state: State,
         transportKind: LoomTransportKind,
@@ -137,6 +176,27 @@ public struct LoomConnectionSnapshot: Identifiable, Hashable, Sendable {
         self.transportKind = transportKind
         self.connectedAt = connectedAt
         self.lastError = lastError
+    }
+
+    public init(
+        id: UUID,
+        peerID: UUID,
+        peerAppID: String? = nil,
+        peerName: String,
+        state: State,
+        transportKind: LoomTransportKind,
+        connectedAt: Date,
+        lastError: String? = nil
+    ) {
+        self.init(
+            id: id,
+            peerID: LoomPeerID(deviceID: peerID, appID: peerAppID),
+            peerName: peerName,
+            state: state,
+            transportKind: transportKind,
+            connectedAt: connectedAt,
+            lastError: lastError
+        )
     }
 }
 
@@ -155,7 +215,7 @@ public struct LoomTransferSnapshot: Identifiable, Hashable, Sendable {
     /// Owning LoomKit connection identifier.
     public let connectionID: UUID
     /// Peer identifier associated with the transfer.
-    public let peerID: UUID
+    public let peerID: LoomPeerID
     /// Logical app-defined transfer name.
     public let logicalName: String
     /// Direction of movement for the transfer.
@@ -175,7 +235,7 @@ public struct LoomTransferSnapshot: Identifiable, Hashable, Sendable {
     public init(
         id: UUID,
         connectionID: UUID,
-        peerID: UUID,
+        peerID: LoomPeerID,
         logicalName: String,
         direction: Direction,
         state: LoomTransferState,
@@ -194,6 +254,33 @@ public struct LoomTransferSnapshot: Identifiable, Hashable, Sendable {
         self.totalBytes = totalBytes
         self.contentType = contentType
         self.fileURL = fileURL
+    }
+
+    public init(
+        id: UUID,
+        connectionID: UUID,
+        peerID: UUID,
+        peerAppID: String? = nil,
+        logicalName: String,
+        direction: Direction,
+        state: LoomTransferState,
+        bytesTransferred: UInt64,
+        totalBytes: UInt64,
+        contentType: String?,
+        fileURL: URL?
+    ) {
+        self.init(
+            id: id,
+            connectionID: connectionID,
+            peerID: LoomPeerID(deviceID: peerID, appID: peerAppID),
+            logicalName: logicalName,
+            direction: direction,
+            state: state,
+            bytesTransferred: bytesTransferred,
+            totalBytes: totalBytes,
+            contentType: contentType,
+            fileURL: fileURL
+        )
     }
 }
 

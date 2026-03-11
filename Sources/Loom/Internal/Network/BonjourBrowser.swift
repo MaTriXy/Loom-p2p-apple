@@ -34,9 +34,9 @@ public final class LoomDiscovery {
 
     private var browser: NWBrowser?
     private let serviceType: String
-    private var peerCandidatesByID: [UUID: [NWEndpoint: LoomPeer]] = [:]
+    private var peerCandidatesByDeviceID: [UUID: [NWEndpoint: LoomHostDiscoveryCandidate]] = [:]
     private var peerIDByEndpoint: [NWEndpoint: UUID] = [:]
-    private var peersByID: [UUID: LoomPeer] = [:]
+    private var peersByID: [LoomPeerID: LoomPeer] = [:]
 
     public init(
         serviceType: String = Loom.serviceType,
@@ -88,7 +88,7 @@ public final class LoomDiscovery {
         browser?.cancel()
         browser = nil
         isSearching = false
-        peerCandidatesByID.removeAll()
+        peerCandidatesByDeviceID.removeAll()
         peerIDByEndpoint.removeAll()
         peersByID.removeAll()
         discoveredPeers.removeAll()
@@ -151,19 +151,29 @@ public final class LoomDiscovery {
             return
         }
 
-        let peer = LoomPeer(
-            id: peerID,
+        let normalizedAdvertisement = LoomPeerAdvertisement(
+            protocolVersion: advertisement.protocolVersion,
+            deviceID: advertisement.deviceID ?? peerID,
+            identityKeyID: advertisement.identityKeyID,
+            deviceType: advertisement.deviceType,
+            modelIdentifier: advertisement.modelIdentifier,
+            iconName: advertisement.iconName,
+            machineFamily: advertisement.machineFamily,
+            directTransports: advertisement.directTransports,
+            metadata: advertisement.metadata
+        )
+        let candidate = LoomHostDiscoveryCandidate(
             name: peerName,
-            deviceType: advertisement.deviceType ?? .unknown,
+            deviceType: normalizedAdvertisement.deviceType ?? .unknown,
             endpoint: result.endpoint,
-            advertisement: advertisement
+            advertisement: normalizedAdvertisement
         )
 
         peerIDByEndpoint[result.endpoint] = peerID
-        var candidates = peerCandidatesByID[peerID] ?? [:]
-        candidates[result.endpoint] = peer
-        peerCandidatesByID[peerID] = candidates
-        updatePeerSelection(for: peerID)
+        var candidates = peerCandidatesByDeviceID[peerID] ?? [:]
+        candidates[result.endpoint] = candidate
+        peerCandidatesByDeviceID[peerID] = candidates
+        updatePeerSelection(forDeviceID: peerID)
     }
 
     private func fallbackPeerID(endpoint: NWEndpoint, peerName: String) -> UUID {
@@ -187,14 +197,14 @@ public final class LoomDiscovery {
         guard let peerID = peerIDByEndpoint.removeValue(forKey: endpoint) else {
             return
         }
-        if var candidates = peerCandidatesByID[peerID] {
+        if var candidates = peerCandidatesByDeviceID[peerID] {
             candidates.removeValue(forKey: endpoint)
             if candidates.isEmpty {
-                peerCandidatesByID.removeValue(forKey: peerID)
-                peersByID.removeValue(forKey: peerID)
+                peerCandidatesByDeviceID.removeValue(forKey: peerID)
+                removeProjectedPeers(forDeviceID: peerID)
             } else {
-                peerCandidatesByID[peerID] = candidates
-                updatePeerSelection(for: peerID)
+                peerCandidatesByDeviceID[peerID] = candidates
+                updatePeerSelection(forDeviceID: peerID)
                 return
             }
         }
@@ -206,7 +216,7 @@ public final class LoomDiscovery {
             if lhs.name != rhs.name {
                 return lhs.name < rhs.name
             }
-            return lhs.id.uuidString < rhs.id.uuidString
+            return lhs.id.rawValue < rhs.id.rawValue
         }
         notifyPeersChanged()
     }
@@ -218,31 +228,68 @@ public final class LoomDiscovery {
     }
 
     package func upsertPeerForTesting(_ peer: LoomPeer) {
-        guard peer.id != localDeviceID else {
+        guard peer.deviceID != localDeviceID else {
             return
         }
-        peerIDByEndpoint[peer.endpoint] = peer.id
-        var candidates = peerCandidatesByID[peer.id] ?? [:]
-        candidates[peer.endpoint] = peer
-        peerCandidatesByID[peer.id] = candidates
-        updatePeerSelection(for: peer.id)
+        peerIDByEndpoint[peer.endpoint] = peer.deviceID
+        let candidate = LoomHostDiscoveryCandidate(
+            name: peer.name,
+            deviceType: peer.deviceType,
+            endpoint: peer.endpoint,
+            advertisement: peer.advertisement.deviceID == nil
+                ? LoomPeerAdvertisement(
+                    protocolVersion: peer.advertisement.protocolVersion,
+                    deviceID: peer.deviceID,
+                    identityKeyID: peer.advertisement.identityKeyID,
+                    deviceType: peer.advertisement.deviceType,
+                    modelIdentifier: peer.advertisement.modelIdentifier,
+                    iconName: peer.advertisement.iconName,
+                    machineFamily: peer.advertisement.machineFamily,
+                    directTransports: peer.advertisement.directTransports,
+                    metadata: peer.advertisement.metadata
+                )
+                : peer.advertisement
+        )
+        var candidates = peerCandidatesByDeviceID[peer.deviceID] ?? [:]
+        candidates[peer.endpoint] = candidate
+        peerCandidatesByDeviceID[peer.deviceID] = candidates
+        updatePeerSelection(forDeviceID: peer.deviceID)
     }
 
     package func removePeerForTesting(endpoint: NWEndpoint) {
         removePeer(for: endpoint)
     }
 
-    private func updatePeerSelection(for peerID: UUID) {
-        guard let candidates = peerCandidatesByID[peerID], !candidates.isEmpty else {
-            peersByID.removeValue(forKey: peerID)
+    private func updatePeerSelection(forDeviceID peerID: UUID) {
+        guard let candidates = peerCandidatesByDeviceID[peerID], !candidates.isEmpty else {
+            removeProjectedPeers(forDeviceID: peerID)
             updatePeersList()
             return
         }
-        peersByID[peerID] = candidates.values.min(by: isPreferredPeer(_:_:))
+        guard let preferredCandidate = candidates.values.min(by: isPreferredPeer(_:_:)) else {
+            removeProjectedPeers(forDeviceID: peerID)
+            updatePeersList()
+            return
+        }
+
+        removeProjectedPeers(forDeviceID: peerID)
+        let projections = LoomHostCatalogCodec.projections(
+            peerName: preferredCandidate.name,
+            advertisement: preferredCandidate.advertisement
+        )
+        for projection in projections {
+            peersByID[projection.peerID] = LoomPeer(
+                id: projection.peerID,
+                name: projection.displayName,
+                deviceType: preferredCandidate.deviceType,
+                endpoint: preferredCandidate.endpoint,
+                advertisement: projection.advertisement
+            )
+        }
         updatePeersList()
     }
 
-    private func isPreferredPeer(_ lhs: LoomPeer, _ rhs: LoomPeer) -> Bool {
+    private func isPreferredPeer(_ lhs: LoomHostDiscoveryCandidate, _ rhs: LoomHostDiscoveryCandidate) -> Bool {
         let leftRank = rank(for: lhs)
         let rightRank = rank(for: rhs)
         if leftRank != rightRank {
@@ -251,11 +298,15 @@ public final class LoomDiscovery {
         return lhs.endpoint.debugDescription < rhs.endpoint.debugDescription
     }
 
-    private func rank(for peer: LoomPeer) -> Int {
+    private func rank(for peer: LoomHostDiscoveryCandidate) -> Int {
         guard let preferredTransport = peer.advertisement.directTransports.min(by: transportIsPreferred(_:_:)) else {
             return Int.max
         }
         return pathRank(preferredTransport.pathKind) * 10 + transportRank(preferredTransport.transportKind)
+    }
+
+    private func removeProjectedPeers(forDeviceID peerID: UUID) {
+        peersByID = peersByID.filter { $0.key.deviceID != peerID }
     }
 
     private func transportIsPreferred(
@@ -311,4 +362,11 @@ public final class LoomDiscovery {
             observer(discoveredPeers)
         }
     }
+}
+
+private struct LoomHostDiscoveryCandidate {
+    let name: String
+    let deviceType: DeviceType
+    let endpoint: NWEndpoint
+    let advertisement: LoomPeerAdvertisement
 }

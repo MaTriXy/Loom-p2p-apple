@@ -218,6 +218,7 @@ public final class LoomShellService {
             peerID: startup.helloRequest.deviceID,
             acceptingConnections: true,
             peerCandidates: candidates,
+            advertisement: startup.advertisement,
             ttlSeconds: ttlSeconds
         )
 
@@ -253,6 +254,7 @@ public final class LoomShellService {
             sessionID: remoteAccess.sessionID,
             acceptingConnections: true,
             peerCandidates: candidates,
+            advertisement: startup.advertisement,
             ttlSeconds: remoteAccess.heartbeatTTLSeconds
         )
 
@@ -342,6 +344,7 @@ public final class LoomShellService {
                 sessionID: currentRemoteAccess.sessionID,
                 acceptingConnections: true,
                 peerCandidates: currentRemoteAccess.peerCandidates,
+                advertisement: currentStartup?.advertisement,
                 ttlSeconds: currentRemoteAccess.heartbeatTTLSeconds
             )
         } catch {

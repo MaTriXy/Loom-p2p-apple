@@ -138,7 +138,7 @@ public final class LoomCloudKitPeerProvider {
         )
 
         if recordIDs.isEmpty {
-            ownPeers.removeAll { $0.id == deviceID }
+            ownPeers.removeAll { $0.deviceID == deviceID }
             return
         }
 
@@ -146,7 +146,7 @@ public final class LoomCloudKitPeerProvider {
             saving: [],
             deleting: recordIDs
         )
-        ownPeers.removeAll { $0.id == deviceID }
+        ownPeers.removeAll { $0.deviceID == deviceID }
         LoomLogger.cloud("Removed own CloudKit peer record(s) for \(deviceID)")
     }
 
@@ -176,15 +176,15 @@ public final class LoomCloudKitPeerProvider {
             throw LoomCloudKitPeerProviderError.sharedPeerNotFound(deviceID: deviceID)
         }
 
-        sharedPeers.removeAll { $0.id == deviceID }
+        sharedPeers.removeAll { $0.deviceID == deviceID }
         LoomLogger.cloud("Removed shared CloudKit peer record(s) for \(deviceID)")
     }
 
     public func removePeer(_ peer: LoomCloudKitPeerInfo) async throws {
         if peer.isShared {
-            try await removeSharedPeer(deviceID: peer.id)
+            try await removeSharedPeer(deviceID: peer.deviceID)
         } else {
-            try await removeOwnPeer(deviceID: peer.id)
+            try await removeOwnPeer(deviceID: peer.deviceID)
         }
     }
 
@@ -253,14 +253,14 @@ private struct PeerRecordSnapshot: Sendable {
 
 private actor PeerRecordSnapshotParser {
     func parse(_ snapshots: [PeerRecordSnapshot]) -> [LoomCloudKitPeerInfo] {
-        snapshots.compactMap(parsePeerRecord)
+        snapshots.flatMap(parsePeerRecord)
     }
 
-    private func parsePeerRecord(_ snapshot: PeerRecordSnapshot) -> LoomCloudKitPeerInfo? {
+    private func parsePeerRecord(_ snapshot: PeerRecordSnapshot) -> [LoomCloudKitPeerInfo] {
         guard let rawDeviceID = snapshot.deviceIDString,
               let deviceID = UUID(uuidString: rawDeviceID) else {
             LoomLogger.cloud("Skipping peer record with invalid deviceID: \(snapshot.recordID)")
-            return nil
+            return []
         }
 
         let deviceType = snapshot.deviceTypeRawValue.flatMap(DeviceType.init(rawValue:)) ?? .unknown
@@ -274,20 +274,26 @@ private actor PeerRecordSnapshotParser {
             try? JSONDecoder().decode(LoomBootstrapMetadata.self, from: $0)
         }
 
-        return LoomCloudKitPeerInfo(
-            id: deviceID,
-            name: snapshot.name ?? "Unknown Peer",
-            deviceType: deviceType,
-            advertisement: advertisement,
-            lastSeen: snapshot.lastSeen ?? Date.distantPast,
-            ownerUserID: snapshot.ownerUserID,
-            isShared: snapshot.isShared,
-            recordID: snapshot.recordID,
-            identityPublicKey: snapshot.identityPublicKey,
-            remoteAccessEnabled: snapshot.remoteAccessEnabled ?? false,
-            relaySessionID: snapshot.relaySessionID,
-            bootstrapMetadata: bootstrapMetadata
+        let projections = LoomHostCatalogCodec.projections(
+            peerName: snapshot.name ?? "Unknown Peer",
+            advertisement: advertisement
         )
+        return projections.map { projection in
+            LoomCloudKitPeerInfo(
+                id: projection.peerID,
+                name: projection.displayName,
+                deviceType: deviceType,
+                advertisement: projection.advertisement,
+                lastSeen: snapshot.lastSeen ?? Date.distantPast,
+                ownerUserID: snapshot.ownerUserID,
+                isShared: snapshot.isShared,
+                recordID: snapshot.recordID,
+                identityPublicKey: snapshot.identityPublicKey,
+                remoteAccessEnabled: snapshot.remoteAccessEnabled ?? false,
+                relaySessionID: snapshot.relaySessionID,
+                bootstrapMetadata: bootstrapMetadata
+            )
+        }
     }
 }
 
