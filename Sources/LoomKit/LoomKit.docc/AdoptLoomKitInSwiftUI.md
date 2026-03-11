@@ -1,6 +1,6 @@
 # Adopt LoomKit in SwiftUI
 
-Use `LoomKit` when you want Loom's nearby discovery, authenticated sessions, transfer engine, optional CloudKit peer sharing, and optional relay reachability to show up in SwiftUI as one coherent runtime.
+Use `LoomKit` when you want Loom's nearby discovery, authenticated sessions, transfer engine, optional CloudKit peer sharing, optional relay reachability, and optional macOS shared-host mode to show up in SwiftUI as one coherent runtime.
 
 `LoomKit` is intentionally modeled after SwiftData:
 
@@ -38,6 +38,8 @@ struct ExampleApp: App {
 
 With `autostart` left at its default value of `true`, LoomKit starts the shared runtime when the scene appears and stops it when the scene goes away.
 
+On macOS, the same container surface can also opt into an App Group-scoped shared host through ``LoomContainerConfiguration/sharedHost``. That lets multiple apps keep one network owner while the SwiftUI layer still talks only to `LoomContext`, `LoomQuery`, and `LoomConnectionHandle`.
+
 ## Read Snapshots In Views
 
 Inside SwiftUI views, use `@Environment(\\.loomContext)` for actions and ``LoomQuery`` for read-only snapshot state:
@@ -74,5 +76,6 @@ This keeps the concurrency split clean:
 ## Next Steps
 
 - Follow <doc:BuildASwiftUIAppWithLoomKit> for the quickest end-to-end integration.
+- Read <doc:ShareOneLoomKitRuntimeAcrossApps> if multiple macOS apps should share one Loom runtime.
 - Read <doc:QueryPeersConnectionsAndTransfers> to understand how `@LoomQuery` behaves.
 - Read <doc:HandleConnectionsAndTransfers> before you build message or transfer features.

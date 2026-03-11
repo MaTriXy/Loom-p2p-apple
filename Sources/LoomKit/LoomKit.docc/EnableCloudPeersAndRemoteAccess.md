@@ -1,6 +1,6 @@
 # Enable Cloud Peers and Remote Access
 
-`LoomKit` does not force CloudKit or relay use, but it knows how to project those systems into the same peer model when you enable them in ``LoomContainerConfiguration``.
+`LoomKit` does not force CloudKit, relay, or shared-host mode, but it knows how to project those systems into the same peer model when you enable them in ``LoomContainerConfiguration``.
 
 ## Add CloudKit To Merge Peer Visibility
 
@@ -48,3 +48,15 @@ Use ``LoomTrustMode`` to decide how much approval friction to keep:
 - ``LoomTrustMode/shareAwareAutoTrust`` to auto-trust peers visible through accepted shares.
 
 See <doc:AddRemoteAccessAndSharingWithLoomKit> for a full walkthrough.
+
+## macOS Shared Host Mode
+
+If multiple apps in one App Group should publish and connect through one shared Loom runtime, set ``LoomContainerConfiguration/sharedHost`` instead of spinning up independent network owners in each process.
+
+That changes the runtime topology, not the app-facing API:
+
+- SwiftUI still reads peers through ``LoomQuery``.
+- Actions still go through ``LoomContext``.
+- Connections still arrive as ``LoomConnectionHandle`` values.
+
+See <doc:ShareOneLoomKitRuntimeAcrossApps> for the LoomKit-first setup flow, and see `LoomHost` for the underlying broker/runtime details.

@@ -13,6 +13,7 @@ Use it when you want:
 - live `@LoomQuery` peer, connection, and transfer snapshots in SwiftUI views
 - actor-backed `LoomConnectionHandle` values for messages, file transfer, and custom multiplexed streams
 - optional CloudKit-backed peer merging and relay-backed remote hosting without changing the app-facing API shape
+- optional App Group-backed shared hosting on macOS when multiple apps should behave like one network host
 
 `LoomKit` sits above `Loom`:
 
@@ -46,3 +47,4 @@ The documentation is organized the same way:
 - <doc:QueryPeersConnectionsAndTransfers>
 - <doc:HandleConnectionsAndTransfers>
 - <doc:EnableCloudPeersAndRemoteAccess>
+- <doc:ShareOneLoomKitRuntimeAcrossApps>

@@ -118,6 +118,7 @@ public struct LoomRelayPresenceStatus: Sendable {
     /// - Parameters:
     ///   - exists: Whether the session exists in signaling.
     ///   - acceptingConnections: Whether the publishing peer currently accepts joins.
+    ///   - advertisement: Optional peer advertisement snapshot currently published for the session.
     ///   - peerCandidates: Candidates currently published by peer heartbeats.
     ///   - lockedToParticipantKeyID: Optional current lock owner identity key.
     ///   - expiresAt: Session expiry timestamp.
@@ -217,6 +218,7 @@ public final class LoomRelayClient {
     ///   - sessionID: Signaling session identifier.
     ///   - peerID: Publishing peer device identifier.
     ///   - acceptingConnections: Whether the peer currently allows remote join.
+    ///   - advertisement: Optional peer advertisement snapshot to publish alongside presence.
     ///   - peerCandidates: Direct-connect candidates to publish.
     ///   - ttlSeconds: Session time-to-live used by signaling.
     ///
