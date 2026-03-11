@@ -25,12 +25,14 @@ final class LoomLocalTrustProvider: LoomTrustProvider {
             guard peer.isIdentityAuthenticated else {
                 return LoomTrustEvaluation(decision: .denied, shouldShowAutoTrustNotice: false)
             }
-            if let identityKeyID = peer.identityKeyID,
-               let identityPublicKey = peer.identityPublicKey,
-               LoomIdentityManager.keyID(for: identityPublicKey) != identityKeyID {
+            guard let identityKeyID = peer.identityKeyID,
+                  let identityPublicKey = peer.identityPublicKey else {
                 return LoomTrustEvaluation(decision: .denied, shouldShowAutoTrustNotice: false)
             }
-            if trustStore.isTrusted(deviceID: peer.deviceID) {
+            if LoomIdentityManager.keyID(for: identityPublicKey) != identityKeyID {
+                return LoomTrustEvaluation(decision: .denied, shouldShowAutoTrustNotice: false)
+            }
+            if trustStore.isTrusted(peerIdentity: peer) {
                 return LoomTrustEvaluation(decision: .trusted, shouldShowAutoTrustNotice: false)
             }
             return LoomTrustEvaluation(decision: .requiresApproval, shouldShowAutoTrustNotice: false)
@@ -38,15 +40,9 @@ final class LoomLocalTrustProvider: LoomTrustProvider {
     }
 
     nonisolated func grantTrust(to peer: LoomPeerIdentity) async throws {
+        let trustedDevice = try LoomTrustedDevice(peerIdentity: peer, trustedAt: Date())
         await MainActor.run {
-            trustStore.addTrustedDevice(
-                LoomTrustedDevice(
-                    id: peer.deviceID,
-                    name: peer.name,
-                    deviceType: peer.deviceType,
-                    trustedAt: Date()
-                )
-            )
+            trustStore.addTrustedDevice(trustedDevice)
         }
     }
 

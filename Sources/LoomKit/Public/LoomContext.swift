@@ -127,12 +127,14 @@ public final class LoomContext {
     public func requestUnlock(
         _ peer: LoomPeerSnapshot,
         username: String,
-        password: String
+        password: String,
+        sshServerTrust: LoomSSHServerTrustConfiguration
     ) async throws -> LoomBootstrapControlResult {
         try await store.requestUnlock(
             peer,
             username: username,
-            password: password
+            password: password,
+            sshServerTrust: sshServerTrust
         )
     }
 

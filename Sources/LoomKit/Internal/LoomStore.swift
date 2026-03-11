@@ -420,7 +420,8 @@ actor LoomStore {
     func requestUnlock(
         _ peerSnapshot: LoomPeerSnapshot,
         username: String,
-        password: String
+        password: String,
+        sshServerTrust: LoomSSHServerTrustConfiguration
     ) async throws -> LoomBootstrapControlResult {
         guard let bootstrapMetadata = resolveBootstrapMetadata(for: peerSnapshot) else {
             throw LoomStoreError.bootstrapMetadataUnavailable
@@ -431,23 +432,7 @@ actor LoomStore {
             throw LoomStoreError.bootstrapMetadataUnavailable
         }
 
-        if bootstrapMetadata.supportsPreloginDaemon,
-           let controlPort = bootstrapMetadata.controlPort,
-           let controlAuthSecret = bootstrapMetadata.controlAuthSecret {
-            return try await bootstrapControlClient.requestUnlock(
-                endpoint: bootstrapEndpoint,
-                controlPort: controlPort,
-                controlAuthSecret: controlAuthSecret,
-                username: username,
-                password: password,
-                timeout: .seconds(20)
-            )
-        }
-
         guard let sshPort = bootstrapMetadata.sshPort else {
-            throw LoomStoreError.controlEndpointUnavailable
-        }
-        guard let sshHostKeyFingerprint = bootstrapMetadata.sshHostKeyFingerprint else {
             throw LoomStoreError.sshEndpointUnavailable
         }
 
@@ -460,7 +445,7 @@ actor LoomStore {
             endpoint: sshEndpoint,
             username: username,
             password: password,
-            expectedHostKeyFingerprint: sshHostKeyFingerprint,
+            serverTrust: sshServerTrust,
             timeout: .seconds(20)
         )
         return LoomBootstrapControlResult(

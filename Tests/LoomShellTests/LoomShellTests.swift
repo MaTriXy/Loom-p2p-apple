@@ -23,12 +23,14 @@ struct LoomShellTests {
             ],
             sshPort: 22,
             controlPort: 9849,
-            sshHostKeyFingerprint: "SHA256:test",
-            controlAuthSecret: "secret",
             wakeOnLAN: nil
         )
 
-        let plan = LoomShellConnectionPlanner.plan(bootstrapMetadata: metadata)
+        let plan = LoomShellConnectionPlanner.plan(
+            bootstrapMetadata: metadata,
+            allowEmergencySSH: true,
+            sshServerTrust: makeSSHServerTrust()
+        )
 
         #expect(plan.primary == LoomShellResolvedTransport.loomNative)
         #expect(plan.fallbacks.count == 2)
@@ -44,8 +46,6 @@ struct LoomShellTests {
             ],
             sshPort: 22,
             controlPort: nil,
-            sshHostKeyFingerprint: "SHA256:test",
-            controlAuthSecret: nil,
             wakeOnLAN: nil
         )
         let capabilities = LoomShellPeerCapabilities(
@@ -57,15 +57,35 @@ struct LoomShellTests {
 
         let plan = LoomShellConnectionPlanner.plan(
             peerCapabilities: capabilities,
-            bootstrapMetadata: metadata
+            bootstrapMetadata: metadata,
+            allowEmergencySSH: true,
+            sshServerTrust: makeSSHServerTrust()
         )
 
         #expect(
-            plan.primary == .openSSH(
-                endpoint: .init(host: "host.example.com", port: 22, source: .user),
-                hostKeyFingerprint: "SHA256:test"
-            )
+            plan.primary == .openSSH(endpoint: .init(host: "host.example.com", port: 22, source: .user))
         )
+        #expect(plan.fallbacks.isEmpty)
+    }
+
+    @Test("Planner skips emergency SSH without explicit trust configuration")
+    func plannerSkipsEmergencySSHWithoutTrustConfiguration() {
+        let metadata = LoomBootstrapMetadata(
+            enabled: true,
+            supportsPreloginDaemon: false,
+            endpoints: [.init(host: "host.example.com", port: 22, source: .user)],
+            sshPort: 22,
+            controlPort: nil,
+            wakeOnLAN: nil
+        )
+
+        let plan = LoomShellConnectionPlanner.plan(
+            bootstrapMetadata: metadata,
+            allowEmergencySSH: true,
+            sshServerTrust: nil
+        )
+
+        #expect(plan.primary == .loomNative)
         #expect(plan.fallbacks.isEmpty)
     }
 
@@ -87,8 +107,6 @@ struct LoomShellTests {
                 endpoints: [.init(host: "host.example.com", port: 22, source: .user)],
                 sshPort: 22,
                 controlPort: 9849,
-                sshHostKeyFingerprint: "SHA256:test",
-                controlAuthSecret: "secret",
                 wakeOnLAN: nil
             )
         )
@@ -235,8 +253,6 @@ struct LoomShellTests {
             endpoints: [.init(host: "host.example.com", port: 22, source: .user)],
             sshPort: 22,
             controlPort: nil,
-            sshHostKeyFingerprint: "SHA256:test",
-            controlAuthSecret: nil,
             wakeOnLAN: nil
         )
 
@@ -244,7 +260,9 @@ struct LoomShellTests {
             _ = try await connector.connect(
                 hello: try identity.makeHelloRequest(),
                 request: LoomShellSessionRequest(),
-                bootstrapMetadata: bootstrapMetadata
+                bootstrapMetadata: bootstrapMetadata,
+                allowEmergencySSH: true,
+                sshServerTrust: makeSSHServerTrust()
             )
             Issue.record("Expected shell connection to fail without direct candidates or SSH credentials.")
         } catch let failure as LoomShellConnectionFailure {
@@ -259,18 +277,74 @@ struct LoomShellTests {
                 Issue.record("Expected the Loom-native attempt to fail with a candidate diagnostic.")
             }
 
-            #expect(
-                failure.report.attempts[1].transport == .openSSH(
-                    endpoint: .init(host: "host.example.com", port: 22, source: .user),
-                    hostKeyFingerprint: "SHA256:test"
-                )
-            )
+            #expect(failure.report.attempts[1].transport == .openSSH(
+                endpoint: .init(host: "host.example.com", port: 22, source: .user)
+            ))
             if case let .skipped(message) = failure.report.attempts[1].outcome {
-                #expect(message.contains("OpenSSH fallback requires authentication"))
+                #expect(message.contains("Emergency SSH requires authentication"))
             } else {
                 Issue.record("Expected the OpenSSH attempt to be skipped without auth material.")
             }
         }
+    }
+
+    @MainActor
+    @Test("Host-side shell authorization blocks PTY startup until approval returns")
+    func hostAuthorizationBlocksSessionStartup() async throws {
+        let host = RecordingShellHost()
+        let server = LoomShellServer(host: host)
+        let sessionContext = try makeSessionContext(decision: .requiresApproval)
+        let gate = AsyncGate()
+        let stream = makeIncomingShellStream()
+
+        let serveTask = Task {
+            await server.handleIncomingStream(
+                stream,
+                sessionContext: sessionContext,
+                authorizationHandler: { _ in
+                    await gate.wait()
+                    return .allowOnce
+                },
+                trustProvider: nil
+            )
+        }
+
+        stream.yield(try LoomShellWireCodec.encode(.open(.init())))
+        try await Task.sleep(for: .milliseconds(100))
+        #expect(await host.startCount() == 0)
+
+        await gate.resume()
+        try await waitUntil(timeout: .seconds(2)) {
+            await host.startCount() == 1
+        }
+
+        stream.finishInbound()
+        await serveTask.value
+    }
+
+    @MainActor
+    @Test("Denied host-side authorization never starts the shell host")
+    func deniedHostAuthorizationPreventsSessionStartup() async throws {
+        let host = RecordingShellHost()
+        let server = LoomShellServer(host: host)
+        let sessionContext = try makeSessionContext(decision: .requiresApproval)
+        let stream = makeIncomingShellStream()
+
+        let serveTask = Task {
+            await server.handleIncomingStream(
+                stream,
+                sessionContext: sessionContext,
+                authorizationHandler: { _ in .deny("no") },
+                trustProvider: nil
+            )
+        }
+
+        stream.yield(try LoomShellWireCodec.encode(.open(.init())))
+        try await Task.sleep(for: .milliseconds(100))
+        #expect(await host.startCount() == 0)
+
+        stream.finishInbound()
+        await serveTask.value
     }
 
     #if os(macOS)
@@ -460,5 +534,123 @@ private func withTimeout<T: Sendable>(
         }
         group.cancelAll()
         return result
+    }
+}
+
+private func waitUntil(
+    timeout: Duration,
+    condition: @escaping @Sendable () async -> Bool
+) async throws {
+    let deadline = ContinuousClock.now + timeout
+    while ContinuousClock.now < deadline {
+        if await condition() {
+            return
+        }
+        try await Task.sleep(for: .milliseconds(20))
+    }
+    throw LoomError.timeout
+}
+
+private func makeSSHServerTrust() -> LoomSSHServerTrustConfiguration {
+    LoomSSHServerTrustConfiguration(
+        trustedHostAuthorities: ["ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIBRqjbco+Jkg1Km2o4iqUmPuWlWN5amobKkRDooVuv1a test-ca"],
+        requiredPrincipal: LoomSSHServerTrustConfiguration.requiredPrincipal(
+            for: UUID(uuidString: "AAAAAAAA-BBBB-CCCC-DDDD-EEEEEEEEEEEE")!
+        )
+    )
+}
+
+@MainActor
+private func makeSessionContext(decision: LoomTrustDecision) throws -> LoomAuthenticatedSessionContext {
+    let identityManager = LoomIdentityManager(
+        service: "com.ethanlipnik.loom.tests.shell-auth.\(UUID().uuidString)",
+        account: "p256-signing",
+        synchronizable: false
+    )
+    let identity = try identityManager.currentIdentity()
+    let peerIdentity = LoomPeerIdentity(
+        deviceID: UUID(),
+        name: "Peer Mac",
+        deviceType: .mac,
+        iCloudUserID: nil,
+        identityKeyID: identity.keyID,
+        identityPublicKey: identity.publicKey,
+        isIdentityAuthenticated: true,
+        endpoint: "127.0.0.1:7777"
+    )
+    return LoomAuthenticatedSessionContext(
+        peerIdentity: peerIdentity,
+        peerAdvertisement: LoomPeerAdvertisement(
+            deviceID: peerIdentity.deviceID,
+            deviceType: .mac
+        ),
+        trustEvaluation: LoomTrustEvaluation(
+            decision: decision,
+            shouldShowAutoTrustNotice: false
+        ),
+        transportKind: .tcp,
+        negotiatedFeatures: LoomSessionHelloRequest.defaultFeatures
+    )
+}
+
+private func makeIncomingShellStream() -> LoomMultiplexedStream {
+    LoomMultiplexedStream(
+        id: 1,
+        label: LoomShellProtocol.streamLabel,
+        sendHandler: { _ in },
+        closeHandler: {}
+    )
+}
+
+private actor RecordingShellHost: LoomShellHost {
+    private var starts = 0
+
+    func startSession(request _: LoomShellSessionRequest) async throws -> any LoomShellHostedSession {
+        starts += 1
+        return RecordingHostedSession()
+    }
+
+    func startCount() -> Int {
+        starts
+    }
+}
+
+private actor RecordingHostedSession: LoomShellHostedSession {
+    let events: AsyncStream<LoomShellEvent>
+    private let continuation: AsyncStream<LoomShellEvent>.Continuation
+
+    init() {
+        let (events, continuation) = AsyncStream.makeStream(of: LoomShellEvent.self)
+        self.events = events
+        self.continuation = continuation
+        continuation.yield(.ready(.init(mergesStandardError: true)))
+        continuation.yield(.exit(.init(exitCode: 0)))
+        continuation.finish()
+    }
+
+    func sendStdin(_: Data) async throws {}
+    func resize(_: LoomShellResizeEvent) async throws {}
+    func close() async {
+        continuation.finish()
+    }
+}
+
+private actor AsyncGate {
+    private var waiter: CheckedContinuation<Void, Never>?
+    private var isOpen = false
+
+    func wait() async {
+        if isOpen {
+            return
+        }
+        await withCheckedContinuation { continuation in
+            waiter = continuation
+        }
+    }
+
+    func resume() {
+        isOpen = true
+        waiter?.resume()
+        waiter = nil
     }
 }

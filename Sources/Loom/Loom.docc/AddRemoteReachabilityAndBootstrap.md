@@ -9,7 +9,7 @@ The broad pattern looks like this:
 3. expose bootstrap metadata for recovery paths
 4. attempt deterministic recovery in app-owned policy order
 
-That is also how `MirageKit` uses Loom. Remote reachability, CloudKit peer records, and bootstrap control are layered on top of the same local discovery and identity model.
+That is also how `MirageKit` uses Loom. Remote reachability, CloudKit peer records, and SSH or Wake-on-LAN recovery are layered on top of the same local discovery and identity model.
 
 ## Start with STUN preflight
 
@@ -61,7 +61,7 @@ Use ``LoomBootstrapMetadata`` to publish optional recovery channels such as:
 
 - SSH endpoints
 - a bootstrap control port
-- a pinned SSH host key fingerprint
+- a preferred SSH port
 - a Wake-on-LAN payload
 
 ```swift
@@ -74,8 +74,6 @@ let bootstrapMetadata = LoomBootstrapMetadata(
     ],
     sshPort: 22,
     controlPort: 9849,
-    sshHostKeyFingerprint: hostKeyFingerprint,
-    controlAuthSecret: controlSecret,
     wakeOnLAN: .init(
         macAddress: "AA:BB:CC:DD:EE:FF",
         broadcastAddresses: ["192.168.1.255"]
@@ -101,29 +99,12 @@ That gives you a stable order:
 
 That deterministic order is important when you want retries to feel predictable across launches.
 
-## Use the control channel first when available
-
-If the peer publishes a control port and auth secret, ``LoomDefaultBootstrapControlClient`` gives you a single-line TCP protocol for status checks and credential submission.
-
-```swift
-let controlClient = LoomDefaultBootstrapControlClient()
-
-let status = try await controlClient.requestStatus(
-    endpoint: orderedEndpoints[0],
-    controlPort: bootstrapMetadata.controlPort ?? 0,
-    controlAuthSecret: bootstrapMetadata.controlAuthSecret ?? "",
-    timeout: .seconds(3)
-)
-```
-
-That is the cleanest path when the peer already exposes a dedicated bootstrap daemon.
-
-## Fall back to Wake-on-LAN or SSH when needed
+## Use Wake-on-LAN or SSH when needed
 
 Loom also ships focused clients for the other common recovery steps:
 
 - ``LoomDefaultWakeOnLANClient`` sends magic packets using ``LoomWakeOnLANInfo``
-- ``LoomDefaultSSHBootstrapClient`` validates pinned-host SSH credentials with ``LoomBootstrapEndpoint``
+- ``LoomDefaultSSHBootstrapClient`` requires an explicit ``LoomSSHServerTrustConfiguration`` and validates OpenSSH host certificates against your trusted host CA keys
 
 Those clients are deliberately narrow. Your app still decides:
 

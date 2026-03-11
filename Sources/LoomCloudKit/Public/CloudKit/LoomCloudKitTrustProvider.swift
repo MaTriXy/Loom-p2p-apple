@@ -101,18 +101,18 @@ public final class LoomCloudKitTrustProvider: LoomTrustProvider {
             LoomLogger.trust("Trust evaluation: denied unauthenticated identity for \(peer.name)")
             return LoomTrustEvaluation(decision: .denied, shouldShowAutoTrustNotice: false)
         }
-        guard let peerIdentityKeyID = peer.identityKeyID else {
-            LoomLogger.trust("Trust evaluation: denied missing identity key ID for \(peer.name)")
+        guard let peerIdentityKeyID = peer.identityKeyID,
+              let peerIdentityPublicKey = peer.identityPublicKey else {
+            LoomLogger.trust("Trust evaluation: denied missing authenticated identity for \(peer.name)")
             return LoomTrustEvaluation(decision: .denied, shouldShowAutoTrustNotice: false)
         }
-        if let publicKey = peer.identityPublicKey,
-           LoomIdentityManager.keyID(for: publicKey) != peerIdentityKeyID {
+        if LoomIdentityManager.keyID(for: peerIdentityPublicKey) != peerIdentityKeyID {
             LoomLogger.trust("Trust evaluation: denied mismatched key ID for \(peer.name)")
             return LoomTrustEvaluation(decision: .denied, shouldShowAutoTrustNotice: false)
         }
 
         // Check if locally trusted (overrides everything)
-        if localTrustStore.isTrusted(deviceID: peer.deviceID) {
+        if localTrustStore.isTrusted(peerIdentity: peer) {
             LoomLogger.trust("Trust evaluation: device \(peer.name) is locally trusted")
             return LoomTrustEvaluation(decision: .trusted, shouldShowAutoTrustNotice: false)
         }
@@ -139,8 +139,18 @@ public final class LoomCloudKitTrustProvider: LoomTrustProvider {
 
         // Check if same iCloud account
         if let myUserID = cloudKitManager.currentUserRecordID, peerUserID == myUserID {
-            LoomLogger.trust("Trust evaluation: same iCloud account for \(peer.name)")
-            return LoomTrustEvaluation(decision: .trusted, shouldShowAutoTrustNotice: true)
+            let identityTrusted = await cloudKitManager.isPublishedPeerIdentityTrusted(
+                deviceID: peer.deviceID,
+                keyID: peerIdentityKeyID,
+                publicKey: peerIdentityPublicKey,
+                ownerUserID: peerUserID
+            )
+            if identityTrusted {
+                LoomLogger.trust("Trust evaluation: same-account published identity trusted for \(peer.name)")
+                return LoomTrustEvaluation(decision: .trusted, shouldShowAutoTrustNotice: true)
+            }
+            LoomLogger.trust("Trust evaluation: same-account identity missing trusted public key for \(peer.name)")
+            return LoomTrustEvaluation(decision: .requiresApproval, shouldShowAutoTrustNotice: false)
         }
 
         guard trustMode == .shareAwareAutoTrust else {
@@ -151,7 +161,10 @@ public final class LoomCloudKitTrustProvider: LoomTrustProvider {
         // Check if peer is a share participant (friend)
         let isParticipant = await cloudKitManager.isShareParticipant(userID: peerUserID)
         if isParticipant {
-            let identityTrusted = await cloudKitManager.isShareParticipantIdentityKeyTrusted(keyID: peerIdentityKeyID)
+            let identityTrusted = await cloudKitManager.isShareParticipantIdentityTrusted(
+                keyID: peerIdentityKeyID,
+                publicKey: peerIdentityPublicKey
+            )
             if identityTrusted {
                 LoomLogger.trust("Trust evaluation: share participant identity trusted for \(peer.name)")
                 return LoomTrustEvaluation(decision: .trusted, shouldShowAutoTrustNotice: false)
@@ -166,14 +179,9 @@ public final class LoomCloudKitTrustProvider: LoomTrustProvider {
     }
 
     public nonisolated func grantTrust(to peer: LoomPeerIdentity) async throws {
+        let device = try LoomTrustedDevice(peerIdentity: peer, trustedAt: Date())
         await MainActor.run {
             // Add to local trust store
-            let device = LoomTrustedDevice(
-                id: peer.deviceID,
-                name: peer.name,
-                deviceType: peer.deviceType,
-                trustedAt: Date()
-            )
             localTrustStore.addTrustedDevice(device)
             LoomLogger.trust("Granted trust to \(peer.name)")
         }

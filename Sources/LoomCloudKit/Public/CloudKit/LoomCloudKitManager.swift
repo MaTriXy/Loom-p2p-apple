@@ -345,9 +345,35 @@ public final class LoomCloudKitManager {
         }
     }
 
-    /// Checks whether a shared participant has published the provided identity key ID.
-    public func isShareParticipantIdentityKeyTrusted(keyID: String) async -> Bool {
-        if let expiration = shareParticipantIdentityCache[keyID], expiration > Date() { return true }
+    /// Checks whether the current account has published the provided peer identity.
+    public func isPublishedPeerIdentityTrusted(
+        deviceID: UUID,
+        keyID: String,
+        publicKey: Data,
+        ownerUserID _: String?
+    ) async -> Bool {
+        guard isAvailable, let container else { return false }
+
+        do {
+            let recordID = CKRecord.ID(recordName: deviceID.uuidString)
+            let record = try await container.privateCloudDatabase.record(for: recordID)
+            if let publishedKeyID = record["identityKeyID"] as? String,
+               let publishedPublicKey = record["identityPublicKey"] as? Data,
+               publishedKeyID == keyID,
+               publishedPublicKey == publicKey {
+                return true
+            }
+        } catch {
+            LoomLogger.error(.cloud, error: error, message: "Failed to verify same-account published identity: ")
+        }
+
+        return false
+    }
+
+    /// Checks whether a shared participant has published the provided identity key.
+    public func isShareParticipantIdentityTrusted(keyID: String, publicKey: Data) async -> Bool {
+        let cacheKey = Self.identityCacheKey(keyID: keyID, publicKey: publicKey)
+        if let expiration = shareParticipantIdentityCache[cacheKey], expiration > Date() { return true }
         guard isAvailable, let container else { return false }
 
         do {
@@ -364,10 +390,14 @@ public final class LoomCloudKitManager {
                         inZoneWith: zone.zoneID
                     )
                     if results.contains(where: { entry in
-                        if case .success = entry.1 { return true }
-                        return false
+                        guard case let .success(record) = entry.1 else {
+                            return false
+                        }
+                        let publishedPublicKey = record["publicKey"] as? Data
+                            ?? record["identityPublicKey"] as? Data
+                        return publishedPublicKey == publicKey
                     }) {
-                        shareParticipantIdentityCache[keyID] = Date()
+                        shareParticipantIdentityCache[cacheKey] = Date()
                             .addingTimeInterval(configuration.shareParticipantCacheTTL)
                         return true
                     }
@@ -399,6 +429,10 @@ public final class LoomCloudKitManager {
 // MARK: - Helpers
 
 extension LoomCloudKitManager {
+    static func identityCacheKey(keyID: String, publicKey: Data) -> String {
+        "\(keyID)|\(publicKey.base64EncodedString())"
+    }
+
     /// Returns a human-readable description of a CloudKit account status.
     static func describeAccountStatus(_ status: CKAccountStatus) -> String {
         switch status {

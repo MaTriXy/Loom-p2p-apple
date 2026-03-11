@@ -9,6 +9,7 @@
 
 @testable import Loom
 import Foundation
+import NIOSSH
 import Testing
 
 @Suite("Loom Bootstrap Metadata")
@@ -96,7 +97,7 @@ struct LoomBootstrapMetadataTests {
                 endpoint: LoomBootstrapEndpoint(host: "   ", port: 22, source: .auto),
                 username: "user",
                 password: "password",
-                expectedHostKeyFingerprint: "SHA256:test-fingerprint",
+                serverTrust: LoomSSHTestFixtures.serverTrustConfiguration,
                 timeout: .seconds(1)
             )
             Issue.record("Expected invalid endpoint rejection.")
@@ -112,28 +113,124 @@ struct LoomBootstrapMetadataTests {
         }
     }
 
-    @Test("SSH bootstrap rejects missing host fingerprint")
-    func sshBootstrapRejectsMissingHostFingerprint() async {
+    @Test("SSH bootstrap rejects invalid trust configuration")
+    func sshBootstrapRejectsInvalidTrustConfiguration() async {
         let client = LoomDefaultSSHBootstrapClient()
         do {
             _ = try await client.unlockVolumeOverSSH(
                 endpoint: LoomBootstrapEndpoint(host: "127.0.0.1", port: 22, source: .auto),
                 username: "user",
                 password: "password",
-                expectedHostKeyFingerprint: "   ",
+                serverTrust: LoomSSHServerTrustConfiguration(
+                    trustedHostAuthorities: [],
+                    requiredPrincipal: ""
+                ),
                 timeout: .seconds(1)
             )
-            Issue.record("Expected missing host-key fingerprint rejection.")
+            Issue.record("Expected invalid trust configuration rejection.")
         } catch let error as LoomSSHBootstrapError {
             switch error {
-            case .missingHostKeyFingerprint:
+            case .invalidServerTrustConfiguration:
                 break
             default:
-                Issue.record("Expected missingHostKeyFingerprint, got \(error.localizedDescription)")
+                Issue.record("Expected invalidServerTrustConfiguration, got \(error.localizedDescription)")
             }
         } catch {
             Issue.record("Expected LoomSSHBootstrapError, got \(error.localizedDescription)")
         }
+    }
+
+    @Test("SSH validator rejects raw host keys")
+    func sshValidatorRejectsRawHostKey() throws {
+        let validator = try LoomSSHServerTrustValidator(
+            configuration: LoomSSHTestFixtures.serverTrustConfiguration
+        )
+        let rawHostKey = try NIOSSHPublicKey(openSSHPublicKey: LoomSSHTestFixtures.rawHostKey)
+
+        do {
+            _ = try validator.validate(hostKey: rawHostKey)
+            Issue.record("Expected raw host key rejection.")
+        } catch let error as LoomSSHServerTrustError {
+            #expect(error == .missingHostCertificate)
+        }
+    }
+
+    @Test("SSH validator rejects wrong principal certificates")
+    func sshValidatorRejectsWrongPrincipal() throws {
+        let validator = try LoomSSHServerTrustValidator(
+            configuration: LoomSSHTestFixtures.serverTrustConfiguration
+        )
+        let hostKey = try NIOSSHPublicKey(
+            openSSHPublicKey: LoomSSHTestFixtures.wrongPrincipalHostCertificate
+        )
+
+        #expect(throws: LoomSSHServerTrustError.self) {
+            _ = try validator.validate(hostKey: hostKey)
+        }
+    }
+
+    @Test("SSH validator rejects host certificates signed by an untrusted CA")
+    func sshValidatorRejectsWrongCA() throws {
+        let validator = try LoomSSHServerTrustValidator(
+            configuration: LoomSSHServerTrustConfiguration(
+                trustedHostAuthorities: [LoomSSHTestFixtures.untrustedHostAuthority],
+                requiredPrincipal: LoomSSHServerTrustConfiguration.requiredPrincipal(
+                    for: LoomSSHTestFixtures.requiredDeviceID
+                )
+            )
+        )
+        let hostKey = try NIOSSHPublicKey(
+            openSSHPublicKey: LoomSSHTestFixtures.validHostCertificate
+        )
+
+        #expect(throws: LoomSSHServerTrustError.self) {
+            _ = try validator.validate(hostKey: hostKey)
+        }
+    }
+
+    @Test("SSH validator rejects expired host certificates")
+    func sshValidatorRejectsExpiredCertificate() throws {
+        let validator = try LoomSSHServerTrustValidator(
+            configuration: LoomSSHTestFixtures.serverTrustConfiguration
+        )
+        let hostKey = try NIOSSHPublicKey(
+            openSSHPublicKey: LoomSSHTestFixtures.expiredHostCertificate
+        )
+
+        #expect(throws: LoomSSHServerTrustError.self) {
+            _ = try validator.validate(hostKey: hostKey)
+        }
+    }
+
+    @Test("SSH validator rejects unsupported critical options")
+    func sshValidatorRejectsUnsupportedCriticalOptions() throws {
+        let validator = try LoomSSHServerTrustValidator(
+            configuration: LoomSSHTestFixtures.serverTrustConfiguration
+        )
+        let hostKey = try NIOSSHPublicKey(
+            openSSHPublicKey: LoomSSHTestFixtures.criticalOptionHostCertificate
+        )
+
+        #expect(throws: LoomSSHServerTrustError.self) {
+            _ = try validator.validate(hostKey: hostKey)
+        }
+    }
+
+    @Test("SSH validator accepts valid host certificates and reports the leaf fingerprint")
+    func sshValidatorAcceptsValidHostCertificate() throws {
+        let validator = try LoomSSHServerTrustValidator(
+            configuration: LoomSSHTestFixtures.serverTrustConfiguration
+        )
+        let hostKey = try NIOSSHPublicKey(
+            openSSHPublicKey: LoomSSHTestFixtures.validHostCertificate
+        )
+
+        let validatedHost = try validator.validate(hostKey: hostKey)
+
+        #expect(validatedHost.principal == LoomSSHServerTrustConfiguration.requiredPrincipal(
+            for: LoomSSHTestFixtures.requiredDeviceID
+        ))
+        #expect(validatedHost.hostKeyFingerprint.hasPrefix("SHA256:"))
     }
 
     @Test("Bootstrap control protocol codable roundtrip")

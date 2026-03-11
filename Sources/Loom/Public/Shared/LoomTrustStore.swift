@@ -8,9 +8,26 @@
 import Foundation
 import Observation
 
+/// Trust-store validation errors.
+public enum LoomTrustStoreError: LocalizedError, Sendable, Equatable {
+    case missingAuthenticatedIdentity
+    case invalidIdentityKey
+
+    public var errorDescription: String? {
+        switch self {
+        case .missingAuthenticatedIdentity:
+            "Trust persistence requires an authenticated Loom identity key."
+        case .invalidIdentityKey:
+            "The peer identity key does not match its advertised key identifier."
+        }
+    }
+}
+
 /// Trusted device record used by Loom trust store.
 public struct LoomTrustedDevice: Identifiable, Codable, Equatable {
     public let id: UUID
+    public let identityKeyID: String
+    public let identityPublicKey: Data
     public let name: String
     public let deviceType: DeviceType
     public let trustedAt: Date
@@ -19,14 +36,57 @@ public struct LoomTrustedDevice: Identifiable, Codable, Equatable {
     ///
     /// - Parameters:
     ///   - id: Device identifier used during handshake.
+    ///   - identityKeyID: Authenticated Loom identity key identifier.
+    ///   - identityPublicKey: Authenticated Loom identity public key bytes.
     ///   - name: Display name shown in trust UI.
     ///   - deviceType: Platform type.
     ///   - trustedAt: Time the trust decision was granted.
-    public init(id: UUID, name: String, deviceType: DeviceType, trustedAt: Date) {
+    public init(
+        id: UUID,
+        identityKeyID: String,
+        identityPublicKey: Data,
+        name: String,
+        deviceType: DeviceType,
+        trustedAt: Date
+    ) {
         self.id = id
+        self.identityKeyID = identityKeyID
+        self.identityPublicKey = identityPublicKey
         self.name = name
         self.deviceType = deviceType
         self.trustedAt = trustedAt
+    }
+
+    /// Creates a persisted trust entry from an authenticated peer identity.
+    public init(peerIdentity: LoomPeerIdentity, trustedAt: Date) throws {
+        guard peerIdentity.isIdentityAuthenticated,
+              let identityKeyID = peerIdentity.identityKeyID,
+              let identityPublicKey = peerIdentity.identityPublicKey else {
+            throw LoomTrustStoreError.missingAuthenticatedIdentity
+        }
+        guard LoomIdentityManager.keyID(for: identityPublicKey) == identityKeyID else {
+            throw LoomTrustStoreError.invalidIdentityKey
+        }
+        self.init(
+            id: peerIdentity.deviceID,
+            identityKeyID: identityKeyID,
+            identityPublicKey: identityPublicKey,
+            name: peerIdentity.name,
+            deviceType: peerIdentity.deviceType,
+            trustedAt: trustedAt
+        )
+    }
+
+    /// Returns whether this record matches the exact authenticated peer identity.
+    public func matches(_ peerIdentity: LoomPeerIdentity) -> Bool {
+        guard peerIdentity.isIdentityAuthenticated,
+              let peerIdentityKeyID = peerIdentity.identityKeyID,
+              let peerIdentityPublicKey = peerIdentity.identityPublicKey else {
+            return false
+        }
+        return id == peerIdentity.deviceID
+            && identityKeyID == peerIdentityKeyID
+            && identityPublicKey == peerIdentityPublicKey
     }
 }
 
@@ -38,6 +98,13 @@ public struct LoomTrustedDevice: Identifiable, Codable, Equatable {
 /// This type stores local trust grants and is commonly combined with a custom
 /// ``LoomTrustProvider`` implementation for auto-trust policies.
 public final class LoomTrustStore {
+    private struct PersistedTrustState: Codable {
+        static let currentVersion = 2
+
+        let version: Int
+        let trustedDevices: [LoomTrustedDevice]
+    }
+
     /// Trusted devices (persisted to UserDefaults).
     public private(set) var trustedDevices: [LoomTrustedDevice] = []
 
@@ -70,11 +137,20 @@ public final class LoomTrustStore {
         do {
             // Avoid writing back while decoding persisted state.
             isLoading = true
-            let decoded = try JSONDecoder().decode([LoomTrustedDevice].self, from: data)
-            trustedDevices = Self.deduplicated(decoded)
+            let decoded = try JSONDecoder().decode(PersistedTrustState.self, from: data)
+            guard decoded.version == PersistedTrustState.currentVersion else {
+                trustedDevices = []
+                userDefaults.removeObject(forKey: trustedDevicesKey)
+                isLoading = false
+                LoomLogger.trust("Discarded unsupported trust-store version \(decoded.version).")
+                return
+            }
+            trustedDevices = Self.deduplicated(decoded.trustedDevices)
             isLoading = false
             LoomLogger.trust("Loaded \(trustedDevices.count) trusted devices")
         } catch {
+            trustedDevices = []
+            userDefaults.removeObject(forKey: trustedDevicesKey)
             isLoading = false
             LoomLogger.error(.trust, error: error, message: "Failed to load trusted devices: ")
         }
@@ -83,7 +159,11 @@ public final class LoomTrustStore {
     private func saveTrustedDevices() {
         guard !isLoading else { return }
         do {
-            let data = try JSONEncoder().encode(Self.deduplicated(trustedDevices))
+            let state = PersistedTrustState(
+                version: PersistedTrustState.currentVersion,
+                trustedDevices: Self.deduplicated(trustedDevices)
+            )
+            let data = try JSONEncoder().encode(state)
             userDefaults.set(data, forKey: trustedDevicesKey)
             LoomLogger.trust("Saved \(trustedDevices.count) trusted devices")
         } catch {
@@ -97,6 +177,11 @@ public final class LoomTrustStore {
     /// - Parameter deviceID: The device identifier to check.
     public func isTrusted(deviceID: UUID) -> Bool {
         trustedDevices.contains { $0.id == deviceID }
+    }
+
+    /// Returns whether the provided authenticated peer identity exactly matches a trusted record.
+    public func isTrusted(peerIdentity: LoomPeerIdentity) -> Bool {
+        trustedDevices.contains { $0.matches(peerIdentity) }
     }
 
     /// Add a trusted device and persist it.

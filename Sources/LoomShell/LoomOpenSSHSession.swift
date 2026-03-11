@@ -5,8 +5,8 @@
 //  Created by Codex on 3/9/26.
 //
 
-import Foundation
 import CryptoKit
+import Foundation
 @preconcurrency import NIOConcurrencyHelpers
 @preconcurrency import NIOCore
 @preconcurrency import NIOPosix
@@ -22,7 +22,7 @@ public actor LoomOpenSSHSession: LoomShellInteractiveSession {
     private let childChannel: Channel
     private var didClose = false
 
-    private init(
+    fileprivate init(
         emitter: LoomShellEventEmitter,
         eventLoopGroup: EventLoopGroup,
         rootChannel: Channel,
@@ -39,23 +39,47 @@ public actor LoomOpenSSHSession: LoomShellInteractiveSession {
         endpoint: LoomBootstrapEndpoint,
         authentication: LoomShellSSHAuthentication,
         request: LoomShellSessionRequest,
-        expectedHostKeyFingerprint: String?,
+        serverTrust: LoomSSHServerTrustConfiguration,
         timeout: Duration = .seconds(10)
     ) async throws -> LoomOpenSSHSession {
+        let preparedConnection = try await prepareConnection(
+            endpoint: endpoint,
+            authentication: authentication,
+            serverTrust: serverTrust,
+            timeout: timeout
+        )
+        do {
+            return try await preparedConnection.openShell(request: request)
+        } catch {
+            await preparedConnection.close()
+            throw error
+        }
+    }
+
+    static func prepareConnection(
+        endpoint: LoomBootstrapEndpoint,
+        authentication: LoomShellSSHAuthentication,
+        serverTrust: LoomSSHServerTrustConfiguration,
+        timeout: Duration = .seconds(10)
+    ) async throws -> LoomPreparedOpenSSHConnection {
         let host = endpoint.host.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !host.isEmpty, endpoint.port > 0 else {
             throw LoomSSHBootstrapError.invalidEndpoint
+        }
+
+        let trustValidator: LoomSSHServerTrustValidator
+        do {
+            trustValidator = try LoomSSHServerTrustValidator(configuration: serverTrust)
+        } catch let error as LoomSSHServerTrustError {
+            throw LoomShellError.invalidSSHServerTrustConfiguration(error.localizedDescription)
         }
 
         let authDelegate = UncheckedSendableBox(
             try Self.makeUserAuthDelegate(authentication: authentication)
         )
         let serverAuthDelegate = UncheckedSendableBox(
-            try LoomShellHostKeyValidationDelegate(
-                expectedFingerprint: expectedHostKeyFingerprint
-            )
+            LoomShellHostKeyValidationDelegate(trustValidator: trustValidator)
         )
-        let emitter = LoomShellEventEmitter()
         let eventLoopGroup = MultiThreadedEventLoopGroup(numberOfThreads: 1)
         let connectTimeout = Self.timeAmount(from: timeout)
 
@@ -87,36 +111,11 @@ public actor LoomOpenSSHSession: LoomShellInteractiveSession {
                 ), value: 1)
 
             let rootChannel = try await bootstrap.connect(host: host, port: Int(endpoint.port)).get()
-
-            let readyPromise = rootChannel.eventLoop.makePromise(of: Void.self)
-            let sessionHandler = LoomOpenSSHShellHandler(
-                request: request,
-                emitter: emitter,
-                readyPromise: readyPromise
-            )
-            let childChannel = try await rootChannel.pipeline.handler(type: NIOSSHHandler.self).flatMap { sshHandler in
-                let childPromise = rootChannel.eventLoop.makePromise(of: Channel.self)
-                sshHandler.createChannel(childPromise, channelType: .session) { channel, channelType in
-                    guard channelType == .session else {
-                        return channel.eventLoop.makeFailedFuture(
-                            LoomShellError.protocolViolation("Unexpected SSH channel type.")
-                        )
-                    }
-                    return channel.pipeline.addHandler(sessionHandler)
-                }
-                return childPromise.futureResult
-            }.get()
-
-            try await readyPromise.futureResult.get()
-
-            return LoomOpenSSHSession(
-                emitter: emitter,
+            return LoomPreparedOpenSSHConnection(
                 eventLoopGroup: eventLoopGroup,
-                rootChannel: rootChannel,
-                childChannel: childChannel
+                rootChannel: rootChannel
             )
         } catch {
-            emitter.finish()
             try? await Self.shutdownEventLoopGroup(eventLoopGroup)
             throw Self.mapToShellError(error)
         }
@@ -159,7 +158,7 @@ public actor LoomOpenSSHSession: LoomShellInteractiveSession {
     }
 }
 
-private extension LoomOpenSSHSession {
+fileprivate extension LoomOpenSSHSession {
     static func makeUserAuthDelegate(
         authentication: LoomShellSSHAuthentication
     ) throws -> any NIOSSHClientUserAuthenticationDelegate {
@@ -253,6 +252,78 @@ private extension LoomOpenSSHSession {
         } catch {
             throw LoomShellError.invalidSSHPrivateKey(error.localizedDescription)
         }
+    }
+}
+
+final class LoomPreparedOpenSSHConnection: @unchecked Sendable {
+    private let eventLoopGroup: EventLoopGroup
+    private let rootChannel: Channel
+    private let lock = NSLock()
+    private var consumed = false
+
+    init(
+        eventLoopGroup: EventLoopGroup,
+        rootChannel: Channel
+    ) {
+        self.eventLoopGroup = eventLoopGroup
+        self.rootChannel = rootChannel
+    }
+
+    deinit {
+        rootChannel.close(promise: nil)
+    }
+
+    func openShell(request: LoomShellSessionRequest) async throws -> LoomOpenSSHSession {
+        try consume()
+
+        let emitter = LoomShellEventEmitter()
+        do {
+            let readyPromise = rootChannel.eventLoop.makePromise(of: Void.self)
+            let sessionHandler = LoomOpenSSHShellHandler(
+                request: request,
+                emitter: emitter,
+                readyPromise: readyPromise
+            )
+            let childChannel = try await rootChannel.pipeline.handler(type: NIOSSHHandler.self).flatMap { sshHandler in
+                let childPromise = self.rootChannel.eventLoop.makePromise(of: Channel.self)
+                sshHandler.createChannel(childPromise, channelType: .session) { channel, channelType in
+                    guard channelType == .session else {
+                        return channel.eventLoop.makeFailedFuture(
+                            LoomShellError.protocolViolation("Unexpected SSH channel type.")
+                        )
+                    }
+                    return channel.pipeline.addHandler(sessionHandler)
+                }
+                return childPromise.futureResult
+            }.get()
+
+            try await readyPromise.futureResult.get()
+
+            return LoomOpenSSHSession(
+                emitter: emitter,
+                eventLoopGroup: eventLoopGroup,
+                rootChannel: rootChannel,
+                childChannel: childChannel
+            )
+        } catch {
+            emitter.finish()
+            await close()
+            throw LoomOpenSSHSession.mapToShellError(error)
+        }
+    }
+
+    func close() async {
+        rootChannel.close(promise: nil)
+        await (try? LoomOpenSSHSession.shutdownEventLoopGroup(eventLoopGroup))
+    }
+
+    private func consume() throws {
+        lock.lock()
+        defer { lock.unlock() }
+        guard !consumed else {
+            throw LoomShellError.protocolViolation("Prepared SSH connection has already been consumed.")
+        }
+        consumed = true
     }
 }
 
@@ -417,53 +488,25 @@ private final class LoomOpenSSHShellHandler: ChannelInboundHandler, @unchecked S
 }
 
 private final class LoomShellHostKeyValidationDelegate: NIOSSHClientServerAuthenticationDelegate, @unchecked Sendable {
-    private let expectedFingerprint: String?
+    private let trustValidator: LoomSSHServerTrustValidator
 
-    init(expectedFingerprint: String?) throws {
-        self.expectedFingerprint = try Self.normalizedFingerprint(expectedFingerprint)
+    init(trustValidator: LoomSSHServerTrustValidator) {
+        self.trustValidator = trustValidator
     }
 
     func validateHostKey(hostKey: NIOSSHPublicKey, validationCompletePromise: EventLoopPromise<Void>) {
         do {
-            guard let expectedFingerprint else {
-                validationCompletePromise.succeed(())
-                return
-            }
-
-            let receivedFingerprint = try Self.fingerprint(for: hostKey)
-            guard receivedFingerprint == expectedFingerprint else {
-                throw LoomShellError.remoteFailure(
-                    "SSH host key fingerprint mismatch (expected \(expectedFingerprint), got \(receivedFingerprint))."
-                )
-            }
+            _ = try trustValidator.validate(hostKey: hostKey)
             validationCompletePromise.succeed(())
         } catch {
-            validationCompletePromise.fail(error)
+            let mappedError: LoomShellError
+            if let trustError = error as? LoomSSHServerTrustError {
+                mappedError = .remoteFailure(trustError.localizedDescription)
+            } else {
+                mappedError = .remoteFailure(error.localizedDescription)
+            }
+            validationCompletePromise.fail(mappedError)
         }
-    }
-
-    private static func normalizedFingerprint(_ raw: String?) throws -> String? {
-        guard let raw else { return nil }
-        let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmed.isEmpty else {
-            throw LoomShellError.missingSSHHostKeyFingerprint
-        }
-        if trimmed.uppercased().hasPrefix("SHA256:") {
-            return "SHA256:\(trimmed.dropFirst("SHA256:".count))"
-        }
-        return "SHA256:\(trimmed)"
-    }
-
-    private static func fingerprint(for hostKey: NIOSSHPublicKey) throws -> String {
-        let openSSH = String(openSSHPublicKey: hostKey)
-        let components = openSSH.split(separator: " ")
-        guard components.count >= 2,
-              let keyData = Data(base64Encoded: String(components[1])) else {
-            throw LoomShellError.remoteFailure("Failed to derive SSH host key fingerprint.")
-        }
-
-        let digest = SHA256.hash(data: keyData)
-        return "SHA256:\(Data(digest).base64EncodedString())"
     }
 }
 

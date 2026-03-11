@@ -11,7 +11,7 @@
 /// Outcome selected by shell transport fallback policy.
 public enum LoomShellResolvedTransport: Sendable, Equatable {
     case loomNative
-    case openSSH(endpoint: LoomBootstrapEndpoint, hostKeyFingerprint: String?)
+    case openSSH(endpoint: LoomBootstrapEndpoint)
 }
 
 /// Outcome of a single shell transport attempt.
@@ -159,23 +159,52 @@ public struct LoomShellSSHAuthentication: Sendable, Equatable {
     }
 }
 
-/// Host key verification policy for interactive SSH fallback sessions.
-public enum LoomShellSSHHostKeyPolicy: Sendable, Equatable {
-    /// Require the pinned fingerprint embedded in bootstrap metadata.
-    case metadataRequired
-    /// Require an explicit pinned fingerprint.
-    case fingerprint(String)
-    /// Skip host-key verification.
-    case acceptAny
+/// Authorization prompt payload surfaced before LoomShell makes a session usable.
+public struct LoomShellAuthorizationRequest: Sendable {
+    public let transport: LoomShellResolvedTransport
+    public let peerIdentity: LoomPeerIdentity?
+    public let trustEvaluation: LoomTrustEvaluation?
+    public let sshServerTrust: LoomSSHServerTrustConfiguration?
+    public let canPersistTrust: Bool
+
+    public init(
+        transport: LoomShellResolvedTransport,
+        peerIdentity: LoomPeerIdentity?,
+        trustEvaluation: LoomTrustEvaluation?,
+        sshServerTrust: LoomSSHServerTrustConfiguration?,
+        canPersistTrust: Bool
+    ) {
+        self.transport = transport
+        self.peerIdentity = peerIdentity
+        self.trustEvaluation = trustEvaluation
+        self.sshServerTrust = sshServerTrust
+        self.canPersistTrust = canPersistTrust
+    }
 }
+
+/// Result returned by a shell-authorization handler.
+public enum LoomShellAuthorizationDecision: Sendable, Equatable {
+    case allowOnce
+    case allowAndTrust
+    case deny(String)
+}
+
+/// Blocking authorization callback invoked before a shell session becomes usable.
+public typealias LoomShellAuthorizationHandler = @Sendable (
+    LoomShellAuthorizationRequest
+) async -> LoomShellAuthorizationDecision
 
 /// App-visible shell connection failure.
 public enum LoomShellError: LocalizedError, Sendable, Equatable {
     case invalidConfiguration(String)
     case missingSSHAuthentication
     case invalidSSHAuthentication
-    case missingSSHHostKeyFingerprint
+    case missingSSHServerTrustConfiguration
+    case invalidSSHServerTrustConfiguration(String)
     case invalidSSHPrivateKey(String)
+    case authorizationRequired(String)
+    case authorizationRejected(String)
+    case authorizationPersistenceUnavailable(String)
     case remoteFailure(String)
     case protocolViolation(String)
     case unsupported(String)
@@ -185,13 +214,21 @@ public enum LoomShellError: LocalizedError, Sendable, Equatable {
         case let .invalidConfiguration(detail):
             "Shell configuration is invalid: \(detail)"
         case .missingSSHAuthentication:
-            "OpenSSH fallback requires authentication material."
+            "Emergency SSH requires authentication material."
         case .invalidSSHAuthentication:
-            "OpenSSH fallback requires at least one valid authentication method."
-        case .missingSSHHostKeyFingerprint:
-            "OpenSSH fallback requires a pinned host key fingerprint unless the caller explicitly opts out."
+            "Emergency SSH requires at least one valid authentication method."
+        case .missingSSHServerTrustConfiguration:
+            "Emergency SSH requires an explicit host-certificate trust configuration."
+        case let .invalidSSHServerTrustConfiguration(detail):
+            "Emergency SSH trust configuration is invalid: \(detail)"
         case let .invalidSSHPrivateKey(detail):
             "OpenSSH private key is invalid: \(detail)"
+        case let .authorizationRequired(detail):
+            "Shell authorization is required: \(detail)"
+        case let .authorizationRejected(detail):
+            "Shell authorization was rejected: \(detail)"
+        case let .authorizationPersistenceUnavailable(detail):
+            "Shell trust could not be persisted: \(detail)"
         case let .remoteFailure(detail):
             "Remote shell failed: \(detail)"
         case let .protocolViolation(detail):
@@ -227,9 +264,16 @@ public enum LoomShellConnectionPlanner {
     public static func plan(
         peerCapabilities: LoomShellPeerCapabilities? = nil,
         bootstrapMetadata: LoomBootstrapMetadata?,
-        preferLoomNative: Bool = true
+        preferLoomNative: Bool = true,
+        allowEmergencySSH: Bool = false,
+        sshServerTrust: LoomSSHServerTrustConfiguration? = nil
     ) -> LoomShellConnectionPlan {
-        let sshFallbacks = resolvedSSHFallbacks(from: bootstrapMetadata)
+        let sshFallbacks = resolvedSSHFallbacks(
+            from: bootstrapMetadata,
+            peerCapabilities: peerCapabilities,
+            allowEmergencySSH: allowEmergencySSH,
+            sshServerTrust: sshServerTrust
+        )
         if peerCapabilities?.supportsLoomNativeShell == false {
             let primary = sshFallbacks.first ?? .loomNative
             return LoomShellConnectionPlan(
@@ -250,8 +294,16 @@ public enum LoomShellConnectionPlanner {
     }
 
     private static func resolvedSSHFallbacks(
-        from bootstrapMetadata: LoomBootstrapMetadata?
+        from bootstrapMetadata: LoomBootstrapMetadata?,
+        peerCapabilities: LoomShellPeerCapabilities?,
+        allowEmergencySSH: Bool,
+        sshServerTrust: LoomSSHServerTrustConfiguration?
     ) -> [LoomShellResolvedTransport] {
+        guard allowEmergencySSH,
+              sshServerTrust != nil,
+              peerCapabilities?.supportsOpenSSHFallback != false else {
+            return []
+        }
         guard let bootstrapMetadata,
               bootstrapMetadata.enabled else {
             return []
@@ -259,9 +311,13 @@ public enum LoomShellConnectionPlanner {
 
         let endpoints = LoomBootstrapEndpointResolver.resolve(bootstrapMetadata.endpoints)
         return endpoints.map { endpoint in
-            .openSSH(
-                endpoint: endpoint,
-                hostKeyFingerprint: bootstrapMetadata.sshHostKeyFingerprint
+            let port = bootstrapMetadata.sshPort ?? endpoint.port
+            return .openSSH(
+                endpoint: LoomBootstrapEndpoint(
+                    host: endpoint.host,
+                    port: port,
+                    source: endpoint.source
+                )
             )
         }
     }
@@ -270,9 +326,11 @@ public enum LoomShellConnectionPlanner {
 /// High-level connector that prefers Loom-native shell sessions and falls back to OpenSSH when enabled.
 @MainActor
 public final class LoomShellConnector {
+    private weak var node: LoomNode?
     private let connectionCoordinator: LoomConnectionCoordinator
 
     public init(node: LoomNode, relayClient: LoomRelayClient? = nil) {
+        self.node = node
         connectionCoordinator = LoomConnectionCoordinator(node: node, relayClient: relayClient)
     }
 
@@ -285,14 +343,18 @@ public final class LoomShellConnector {
         bootstrapMetadata: LoomBootstrapMetadata? = nil,
         sshAuthentication: LoomShellSSHAuthentication? = nil,
         preferLoomNative: Bool = true,
-        sshHostKeyPolicy: LoomShellSSHHostKeyPolicy = .metadataRequired,
+        allowEmergencySSH: Bool = false,
+        sshServerTrust: LoomSSHServerTrustConfiguration? = nil,
+        authorizationHandler: LoomShellAuthorizationHandler? = nil,
         timeout: Duration = .seconds(10)
     ) async throws -> LoomShellConnectionResult {
         try await connect(
             using: LoomShellConnectionPlanner.plan(
                 peerCapabilities: peerCapabilities,
                 bootstrapMetadata: bootstrapMetadata,
-                preferLoomNative: preferLoomNative
+                preferLoomNative: preferLoomNative,
+                allowEmergencySSH: allowEmergencySSH,
+                sshServerTrust: sshServerTrust
             ),
             hello: hello,
             request: request,
@@ -301,7 +363,8 @@ public final class LoomShellConnector {
             peerCapabilities: peerCapabilities,
             bootstrapMetadata: bootstrapMetadata,
             sshAuthentication: sshAuthentication,
-            sshHostKeyPolicy: sshHostKeyPolicy,
+            sshServerTrust: sshServerTrust,
+            authorizationHandler: authorizationHandler,
             timeout: timeout
         )
     }
@@ -313,7 +376,9 @@ public final class LoomShellConnector {
         relaySessionID: String? = nil,
         sshAuthentication: LoomShellSSHAuthentication? = nil,
         preferLoomNative: Bool = true,
-        sshHostKeyPolicy: LoomShellSSHHostKeyPolicy = .metadataRequired,
+        allowEmergencySSH: Bool = false,
+        sshServerTrust: LoomSSHServerTrustConfiguration? = nil,
+        authorizationHandler: LoomShellAuthorizationHandler? = nil,
         timeout: Duration = .seconds(10)
     ) async throws -> LoomShellConnectionResult {
         let hello = try identity.makeHelloRequest()
@@ -326,7 +391,9 @@ public final class LoomShellConnector {
             bootstrapMetadata: peer.bootstrapMetadata,
             sshAuthentication: sshAuthentication,
             preferLoomNative: preferLoomNative,
-            sshHostKeyPolicy: sshHostKeyPolicy,
+            allowEmergencySSH: allowEmergencySSH,
+            sshServerTrust: sshServerTrust,
+            authorizationHandler: authorizationHandler,
             timeout: timeout
         )
     }
@@ -340,7 +407,8 @@ public final class LoomShellConnector {
         peerCapabilities: LoomShellPeerCapabilities?,
         bootstrapMetadata: LoomBootstrapMetadata?,
         sshAuthentication: LoomShellSSHAuthentication?,
-        sshHostKeyPolicy: LoomShellSSHHostKeyPolicy,
+        sshServerTrust: LoomSSHServerTrustConfiguration?,
+        authorizationHandler: LoomShellAuthorizationHandler?,
         timeout: Duration
     ) async throws -> LoomShellConnectionResult {
         var attempts: [LoomShellConnectionAttempt] = []
@@ -387,27 +455,36 @@ public final class LoomShellConnector {
                                 to: target,
                                 hello: hello
                             )
-                            let shellSession = try await LoomNativeShellSession.open(
-                                over: authenticatedSession,
-                                request: request
-                            )
-                            attempts.append(
-                                LoomShellConnectionAttempt(
-                                    transport: .loomNative,
-                                    directPath: directPath,
-                                    outcome: .succeeded
+                            do {
+                                let sessionContext = try await authorizeLoomNativeSession(
+                                    authenticatedSession,
+                                    authorizationHandler: authorizationHandler
                                 )
-                            )
-                            let report = LoomShellConnectionReport(
-                                attempts: attempts,
-                                selectedTransport: .loomNative
-                            )
-                            return LoomShellConnectionResult(
-                                transport: .loomNative,
-                                session: shellSession,
-                                authenticatedSessionContext: await authenticatedSession.context,
-                                report: report
-                            )
+                                let shellSession = try await LoomNativeShellSession.open(
+                                    over: authenticatedSession,
+                                    request: request
+                                )
+                                attempts.append(
+                                    LoomShellConnectionAttempt(
+                                        transport: .loomNative,
+                                        directPath: directPath,
+                                        outcome: .succeeded
+                                    )
+                                )
+                                let report = LoomShellConnectionReport(
+                                    attempts: attempts,
+                                    selectedTransport: .loomNative
+                                )
+                                return LoomShellConnectionResult(
+                                    transport: .loomNative,
+                                    session: shellSession,
+                                    authenticatedSessionContext: sessionContext,
+                                    report: report
+                                )
+                            } catch {
+                                await authenticatedSession.cancel()
+                                throw error
+                            }
                         } catch {
                             attempts.append(
                                 LoomShellConnectionAttempt(
@@ -419,7 +496,7 @@ public final class LoomShellConnector {
                             lastError = error
                         }
                     }
-                case let .openSSH(endpoint, metadataFingerprint):
+                case let .openSSH(endpoint):
                     guard let sshAuthentication else {
                         let error = LoomShellError.missingSSHAuthentication
                         attempts.append(
@@ -433,34 +510,52 @@ public final class LoomShellConnector {
                         continue
                     }
                     let validatedAuthentication = try validateSSHAuthentication(sshAuthentication)
-                    let resolvedFingerprint = try resolveHostKeyFingerprint(
-                        policy: sshHostKeyPolicy,
-                        metadataFingerprint: metadataFingerprint
-                    )
-                    let shellSession = try await LoomOpenSSHSession.connect(
+                    guard let sshServerTrust else {
+                        let error = LoomShellError.missingSSHServerTrustConfiguration
+                        attempts.append(
+                            LoomShellConnectionAttempt(
+                                transport: transport,
+                                directPath: nil,
+                                outcome: .skipped(error.localizedDescription)
+                            )
+                        )
+                        lastError = error
+                        continue
+                    }
+                    let preparedConnection = try await LoomOpenSSHSession.prepareConnection(
                         endpoint: endpoint,
                         authentication: validatedAuthentication,
-                        request: request,
-                        expectedHostKeyFingerprint: resolvedFingerprint,
+                        serverTrust: sshServerTrust,
                         timeout: timeout
                     )
-                    attempts.append(
-                        LoomShellConnectionAttempt(
+                    do {
+                        try await authorizeEmergencySSH(
                             transport: transport,
-                            directPath: nil,
-                            outcome: .succeeded
+                            serverTrust: sshServerTrust,
+                            authorizationHandler: authorizationHandler
                         )
-                    )
-                    let report = LoomShellConnectionReport(
-                        attempts: attempts,
-                        selectedTransport: transport
-                    )
-                    return LoomShellConnectionResult(
-                        transport: transport,
-                        session: shellSession,
-                        authenticatedSessionContext: nil,
-                        report: report
-                    )
+                        let shellSession = try await preparedConnection.openShell(request: request)
+                        attempts.append(
+                            LoomShellConnectionAttempt(
+                                transport: transport,
+                                directPath: nil,
+                                outcome: .succeeded
+                            )
+                        )
+                        let report = LoomShellConnectionReport(
+                            attempts: attempts,
+                            selectedTransport: transport
+                        )
+                        return LoomShellConnectionResult(
+                            transport: transport,
+                            session: shellSession,
+                            authenticatedSessionContext: nil,
+                            report: report
+                        )
+                    } catch {
+                        await preparedConnection.close()
+                        throw error
+                    }
                 }
             } catch {
                 attempts.append(
@@ -482,31 +577,6 @@ public final class LoomShellConnector {
         throw LoomShellConnectionFailure(report: report, underlyingMessage: message)
     }
 
-    private func resolveHostKeyFingerprint(
-        policy: LoomShellSSHHostKeyPolicy,
-        metadataFingerprint: String?
-    ) throws -> String? {
-        switch policy {
-        case .acceptAny:
-            return nil
-        case let .fingerprint(value):
-            let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
-            guard !trimmed.isEmpty else {
-                throw LoomShellError.missingSSHHostKeyFingerprint
-            }
-            return trimmed
-        case .metadataRequired:
-            guard let metadataFingerprint else {
-                throw LoomShellError.missingSSHHostKeyFingerprint
-            }
-            let trimmed = metadataFingerprint.trimmingCharacters(in: .whitespacesAndNewlines)
-            guard !trimmed.isEmpty else {
-                throw LoomShellError.missingSSHHostKeyFingerprint
-            }
-            return trimmed
-        }
-    }
-
     private func validateSSHAuthentication(
         _ authentication: LoomShellSSHAuthentication
     ) throws -> LoomShellSSHAuthentication {
@@ -521,5 +591,93 @@ public final class LoomShellConnector {
             username: username,
             methods: authentication.methods
         )
+    }
+
+    private func authorizeLoomNativeSession(
+        _ authenticatedSession: LoomAuthenticatedSession,
+        authorizationHandler: LoomShellAuthorizationHandler?
+    ) async throws -> LoomAuthenticatedSessionContext {
+        guard let sessionContext = await authenticatedSession.context else {
+            throw LoomShellError.protocolViolation("Authenticated Loom session is missing its context.")
+        }
+        switch sessionContext.trustEvaluation.decision {
+        case .trusted:
+            return sessionContext
+        case .denied:
+            throw LoomShellError.authorizationRejected(
+                "The Loom trust provider denied the shell session."
+            )
+        case .requiresApproval, .unavailable(_):
+            guard let authorizationHandler else {
+                throw LoomShellError.authorizationRequired(
+                    "Loom-native shell requires an explicit authorization handler."
+                )
+            }
+            let canPersistTrust = node?.trustProvider != nil
+            let request = LoomShellAuthorizationRequest(
+                transport: .loomNative,
+                peerIdentity: sessionContext.peerIdentity,
+                trustEvaluation: sessionContext.trustEvaluation,
+                sshServerTrust: nil,
+                canPersistTrust: canPersistTrust
+            )
+            let decision = await authorizationHandler(request)
+            try await handleAuthorizationDecision(
+                decision,
+                peerIdentity: sessionContext.peerIdentity,
+                canPersistTrust: canPersistTrust
+            )
+            return sessionContext
+        }
+    }
+
+    private func authorizeEmergencySSH(
+        transport: LoomShellResolvedTransport,
+        serverTrust: LoomSSHServerTrustConfiguration,
+        authorizationHandler: LoomShellAuthorizationHandler?
+    ) async throws {
+        guard let authorizationHandler else {
+            throw LoomShellError.authorizationRequired(
+                "Emergency SSH requires an explicit authorization handler."
+            )
+        }
+        let request = LoomShellAuthorizationRequest(
+            transport: transport,
+            peerIdentity: nil,
+            trustEvaluation: nil,
+            sshServerTrust: serverTrust,
+            canPersistTrust: false
+        )
+        let decision = await authorizationHandler(request)
+        switch decision {
+        case .allowOnce:
+            return
+        case .allowAndTrust:
+            throw LoomShellError.authorizationPersistenceUnavailable(
+                "LoomShell does not persist emergency SSH approvals."
+            )
+        case let .deny(reason):
+            throw LoomShellError.authorizationRejected(reason)
+        }
+    }
+
+    private func handleAuthorizationDecision(
+        _ decision: LoomShellAuthorizationDecision,
+        peerIdentity: LoomPeerIdentity,
+        canPersistTrust: Bool
+    ) async throws {
+        switch decision {
+        case .allowOnce:
+            return
+        case .allowAndTrust:
+            guard canPersistTrust, let trustProvider = node?.trustProvider else {
+                throw LoomShellError.authorizationPersistenceUnavailable(
+                    "No Loom trust provider is configured for persistent shell trust."
+                )
+            }
+            try await trustProvider.grantTrust(to: peerIdentity)
+        case let .deny(reason):
+            throw LoomShellError.authorizationRejected(reason)
+        }
     }
 }

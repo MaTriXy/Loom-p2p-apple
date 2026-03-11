@@ -13,9 +13,6 @@ import NIOConcurrencyHelpers
 import NIOCore
 import NIOPosix
 import NIOSSH
-#if canImport(CryptoKit)
-import CryptoKit
-#endif
 #endif
 
 /// Result of an SSH bootstrap unlock attempt.
@@ -38,7 +35,7 @@ public enum LoomSSHBootstrapError: LocalizedError, Sendable, Equatable {
     case authenticationFailed
     case timedOut
     case invalidEndpoint
-    case missingHostKeyFingerprint
+    case invalidServerTrustConfiguration(String)
 
     /// Human-readable error text for UI and diagnostics.
     public var errorDescription: String? {
@@ -53,8 +50,8 @@ public enum LoomSSHBootstrapError: LocalizedError, Sendable, Equatable {
             "SSH bootstrap timed out."
         case .invalidEndpoint:
             "SSH bootstrap endpoint is invalid."
-        case .missingHostKeyFingerprint:
-            "SSH bootstrap requires a pinned host key fingerprint."
+        case let .invalidServerTrustConfiguration(detail):
+            "SSH bootstrap requires a valid SSH host trust configuration: \(detail)"
         }
     }
 }
@@ -67,7 +64,7 @@ public protocol LoomSSHBootstrapClient: Sendable {
     ///   - endpoint: Host endpoint to contact.
     ///   - username: Account username used for SSH authentication.
     ///   - password: Account password used for SSH authentication.
-    ///   - expectedHostKeyFingerprint: Pinned host key fingerprint (`SHA256:...`).
+    ///   - serverTrust: SSH host-certificate trust configuration.
     ///   - timeout: End-to-end timeout for connection and auth probe.
     /// - Returns: Unlock status returned by the SSH bootstrap implementation.
     /// - Throws: ``LoomSSHBootstrapError`` on auth, transport, or timeout failures.
@@ -75,7 +72,7 @@ public protocol LoomSSHBootstrapClient: Sendable {
         endpoint: LoomBootstrapEndpoint,
         username: String,
         password: String,
-        expectedHostKeyFingerprint: String,
+        serverTrust: LoomSSHServerTrustConfiguration,
         timeout: Duration
     ) async throws -> LoomSSHBootstrapResult
 }
@@ -97,15 +94,21 @@ public struct LoomDefaultSSHBootstrapClient: LoomSSHBootstrapClient {
         endpoint: LoomBootstrapEndpoint,
         username: String,
         password: String,
-        expectedHostKeyFingerprint: String,
+        serverTrust: LoomSSHServerTrustConfiguration,
         timeout: Duration
     )
     async throws -> LoomSSHBootstrapResult {
         let host = endpoint.host.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !host.isEmpty else { throw LoomSSHBootstrapError.invalidEndpoint }
         guard endpoint.port > 0 else { throw LoomSSHBootstrapError.invalidEndpoint }
-        let fingerprint = expectedHostKeyFingerprint.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !fingerprint.isEmpty else { throw LoomSSHBootstrapError.missingHostKeyFingerprint }
+        let trustValidator: LoomSSHServerTrustValidator
+        do {
+            trustValidator = try LoomSSHServerTrustValidator(configuration: serverTrust)
+        } catch let error as LoomSSHServerTrustError {
+            throw LoomSSHBootstrapError.invalidServerTrustConfiguration(
+                error.localizedDescription
+            )
+        }
 
 #if canImport(NIOConcurrencyHelpers) && canImport(NIOCore) && canImport(NIOPosix) && canImport(NIOSSH)
         let timeoutNanoseconds = Self.timeoutNanoseconds(timeout)
@@ -119,7 +122,7 @@ public struct LoomDefaultSSHBootstrapClient: LoomSSHBootstrapClient {
                     port: Int(endpoint.port),
                     username: username,
                     password: password,
-                    expectedHostKeyFingerprint: fingerprint
+                    trustValidator: trustValidator
                 )
             }
             group.addTask {
@@ -146,16 +149,14 @@ private extension LoomDefaultSSHBootstrapClient {
         port: Int,
         username: String,
         password: String,
-        expectedHostKeyFingerprint: String
+        trustValidator: LoomSSHServerTrustValidator
     ) async throws -> LoomSSHBootstrapResult {
         let eventLoopGroup = MultiThreadedEventLoopGroup(numberOfThreads: 1)
         let authDelegate = SinglePasswordAuthenticationDelegate(
             username: username,
             password: password
         )
-        let serverAuthDelegate = try HostKeyValidationDelegate(
-            expectedFingerprint: expectedHostKeyFingerprint
-        )
+        let serverAuthDelegate = HostKeyValidationDelegate(trustValidator: trustValidator)
 
         do {
             let bootstrap = ClientBootstrap(group: eventLoopGroup)
@@ -322,55 +323,25 @@ private extension LoomDefaultSSHBootstrapClient {
 }
 
 private final class HostKeyValidationDelegate: NIOSSHClientServerAuthenticationDelegate, @unchecked Sendable {
-    private let expectedFingerprint: String
+    private let trustValidator: LoomSSHServerTrustValidator
 
-    init(expectedFingerprint: String) throws {
-        guard let normalized = Self.normalizedFingerprint(expectedFingerprint) else {
-            throw LoomSSHBootstrapError.missingHostKeyFingerprint
-        }
-        self.expectedFingerprint = normalized
+    init(trustValidator: LoomSSHServerTrustValidator) {
+        self.trustValidator = trustValidator
     }
 
     func validateHostKey(hostKey: NIOSSHPublicKey, validationCompletePromise: EventLoopPromise<Void>) {
         do {
-            let receivedFingerprint = try Self.fingerprint(for: hostKey)
-            guard receivedFingerprint == expectedFingerprint else {
-                throw LoomSSHBootstrapError.connectionFailed(
-                    "SSH host key fingerprint mismatch (expected \(expectedFingerprint), got \(receivedFingerprint))."
-                )
-            }
+            _ = try trustValidator.validate(hostKey: hostKey)
             validationCompletePromise.succeed(())
         } catch {
-            validationCompletePromise.fail(error)
+            let mappedError: LoomSSHBootstrapError
+            if let trustError = error as? LoomSSHServerTrustError {
+                mappedError = .connectionFailed(trustError.localizedDescription)
+            } else {
+                mappedError = .connectionFailed(error.localizedDescription)
+            }
+            validationCompletePromise.fail(mappedError)
         }
-    }
-
-    private static func normalizedFingerprint(_ raw: String?) -> String? {
-        guard let raw else { return nil }
-        let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmed.isEmpty else { return nil }
-        if trimmed.uppercased().hasPrefix("SHA256:") {
-            let suffix = String(trimmed.dropFirst("SHA256:".count))
-            return "SHA256:\(suffix)"
-        }
-        return "SHA256:\(trimmed)"
-    }
-
-    private static func fingerprint(for hostKey: NIOSSHPublicKey) throws -> String {
-        let openSSH = String(openSSHPublicKey: hostKey)
-        let components = openSSH.split(separator: " ")
-        guard components.count >= 2,
-              let keyData = Data(base64Encoded: String(components[1])) else {
-            throw LoomSSHBootstrapError.connectionFailed("Failed to derive host key fingerprint.")
-        }
-
-#if canImport(CryptoKit)
-        let digest = SHA256.hash(data: keyData)
-        let fingerprint = Data(digest).base64EncodedString()
-        return "SHA256:\(fingerprint)"
-#else
-        throw LoomSSHBootstrapError.connectionFailed("Host key fingerprinting is unavailable on this platform build.")
-#endif
     }
 }
 

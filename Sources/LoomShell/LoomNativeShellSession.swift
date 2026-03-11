@@ -137,24 +137,49 @@ public actor LoomShellServer {
         self.host = host
     }
 
-    public func serve(session: LoomAuthenticatedSession) async {
+    public func serve(
+        session: LoomAuthenticatedSession,
+        authorizationHandler: LoomShellAuthorizationHandler? = nil,
+        trustProvider: (any LoomTrustProvider)? = nil
+    ) async {
+        let sessionContext = await session.context
         for await stream in session.incomingStreams {
             guard stream.label == nil || stream.label == LoomShellProtocol.streamLabel else {
                 continue
             }
             Task { [host] in
-                await LoomShellServer.handleIncomingStream(stream, host: host)
+                await LoomShellServer.handleIncomingStream(
+                    stream,
+                    host: host,
+                    sessionContext: sessionContext,
+                    authorizationHandler: authorizationHandler,
+                    trustProvider: trustProvider
+                )
             }
         }
     }
 
-    public func handleIncomingStream(_ stream: LoomMultiplexedStream) async {
-        await Self.handleIncomingStream(stream, host: host)
+    public func handleIncomingStream(
+        _ stream: LoomMultiplexedStream,
+        sessionContext: LoomAuthenticatedSessionContext? = nil,
+        authorizationHandler: LoomShellAuthorizationHandler? = nil,
+        trustProvider: (any LoomTrustProvider)? = nil
+    ) async {
+        await Self.handleIncomingStream(
+            stream,
+            host: host,
+            sessionContext: sessionContext,
+            authorizationHandler: authorizationHandler,
+            trustProvider: trustProvider
+        )
     }
 
     private static func handleIncomingStream(
         _ stream: LoomMultiplexedStream,
-        host: any LoomShellHost
+        host: any LoomShellHost,
+        sessionContext: LoomAuthenticatedSessionContext?,
+        authorizationHandler: LoomShellAuthorizationHandler?,
+        trustProvider: (any LoomTrustProvider)?
     ) async {
         let channel = LoomShellChannel(stream: stream)
         var iterator = channel.incomingFrames.makeAsyncIterator()
@@ -184,6 +209,11 @@ public actor LoomShellServer {
                     continuation.finish()
                 }
             }
+            try await authorizeSessionUse(
+                sessionContext: sessionContext,
+                authorizationHandler: authorizationHandler,
+                trustProvider: trustProvider
+            )
             let hostedSession = try await host.startSession(request: request)
             await runBridge(
                 channel: channel,
@@ -195,6 +225,55 @@ public actor LoomShellServer {
                 LoomShellWireCodec.encode(.failure(error.localizedDescription))
             )
             await channel.close()
+        }
+    }
+
+    private static func authorizeSessionUse(
+        sessionContext: LoomAuthenticatedSessionContext?,
+        authorizationHandler: LoomShellAuthorizationHandler?,
+        trustProvider: (any LoomTrustProvider)?
+    ) async throws {
+        guard let sessionContext else {
+            throw LoomShellError.protocolViolation(
+                "Accepted Loom shell stream is missing its authenticated session context."
+            )
+        }
+
+        switch sessionContext.trustEvaluation.decision {
+        case .trusted:
+            return
+        case .denied:
+            throw LoomShellError.authorizationRejected(
+                "The Loom trust provider denied the shell session."
+            )
+        case .requiresApproval, .unavailable(_):
+            guard let authorizationHandler else {
+                throw LoomShellError.authorizationRequired(
+                    "Host-side Loom shell requires an explicit authorization handler."
+                )
+            }
+            let canPersistTrust = trustProvider != nil
+            let request = LoomShellAuthorizationRequest(
+                transport: .loomNative,
+                peerIdentity: sessionContext.peerIdentity,
+                trustEvaluation: sessionContext.trustEvaluation,
+                sshServerTrust: nil,
+                canPersistTrust: canPersistTrust
+            )
+            let decision = await authorizationHandler(request)
+            switch decision {
+            case .allowOnce:
+                return
+            case .allowAndTrust:
+                guard canPersistTrust, let trustProvider else {
+                    throw LoomShellError.authorizationPersistenceUnavailable(
+                        "No Loom trust provider is configured for persistent shell trust."
+                    )
+                }
+                try await trustProvider.grantTrust(to: sessionContext.peerIdentity)
+            case let .deny(reason):
+                throw LoomShellError.authorizationRejected(reason)
+            }
         }
     }
 

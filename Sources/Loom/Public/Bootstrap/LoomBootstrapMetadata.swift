@@ -68,7 +68,7 @@ public struct LoomWakeOnLANInfo: Codable, Hashable, Sendable {
 /// Bootstrap capability metadata stored with peer records.
 public struct LoomBootstrapMetadata: Codable, Hashable, Sendable {
     /// Metadata version for forward-compatible decoding.
-    public static let currentVersion = 3
+    public static let currentVersion = 4
 
     /// Metadata schema version.
     public let version: Int
@@ -82,10 +82,6 @@ public struct LoomBootstrapMetadata: Codable, Hashable, Sendable {
     public let sshPort: UInt16?
     /// Optional bootstrap control port for daemon handoff.
     public let controlPort: UInt16?
-    /// Optional pinned SSH host key fingerprint (`SHA256:...`) for bootstrap trust.
-    public let sshHostKeyFingerprint: String?
-    /// Shared secret used by the authenticated bootstrap control protocol.
-    public let controlAuthSecret: String?
     /// Wake-on-LAN metadata when available.
     public let wakeOnLAN: LoomWakeOnLANInfo?
 
@@ -98,8 +94,6 @@ public struct LoomBootstrapMetadata: Codable, Hashable, Sendable {
     ///   - endpoints: Candidate endpoints for bootstrap connection attempts.
     ///   - sshPort: Preferred SSH port.
     ///   - controlPort: Preferred daemon control port.
-    ///   - sshHostKeyFingerprint: Optional pinned SSH host key fingerprint.
-    ///   - controlAuthSecret: Shared secret for authenticated bootstrap daemon control requests.
     ///   - wakeOnLAN: Optional Wake-on-LAN payload data.
     ///
     /// Example:
@@ -110,8 +104,6 @@ public struct LoomBootstrapMetadata: Codable, Hashable, Sendable {
     ///     endpoints: [.init(host: "192.168.1.10", port: 22, source: .auto)],
     ///     sshPort: 22,
     ///     controlPort: 9849,
-    ///     sshHostKeyFingerprint: "SHA256:...",
-    ///     controlAuthSecret: "base64-secret",
     ///     wakeOnLAN: .init(macAddress: "AA:BB:CC:DD:EE:FF", broadcastAddresses: ["192.168.1.255"])
     /// )
     /// ```
@@ -122,8 +114,6 @@ public struct LoomBootstrapMetadata: Codable, Hashable, Sendable {
         endpoints: [LoomBootstrapEndpoint],
         sshPort: UInt16?,
         controlPort: UInt16?,
-        sshHostKeyFingerprint: String? = nil,
-        controlAuthSecret: String? = nil,
         wakeOnLAN: LoomWakeOnLANInfo?
     ) {
         self.version = version
@@ -132,8 +122,6 @@ public struct LoomBootstrapMetadata: Codable, Hashable, Sendable {
         self.endpoints = endpoints
         self.sshPort = sshPort
         self.controlPort = controlPort
-        self.sshHostKeyFingerprint = sshHostKeyFingerprint
-        self.controlAuthSecret = controlAuthSecret
         self.wakeOnLAN = wakeOnLAN
     }
 }

@@ -22,6 +22,7 @@ public struct LoomBootstrapControlPeer: Sendable, Equatable {
 }
 
 /// Server-side runtime for the authenticated bootstrap control protocol.
+@available(*, deprecated, message: "Bootstrap control is weaker than SSH host-certificate bootstrap. Prefer LoomSSHBootstrapClient with LoomSSHServerTrustConfiguration.")
 public actor LoomBootstrapControlServer {
     public typealias StatusHandler = @Sendable (LoomBootstrapControlPeer) async throws -> LoomBootstrapControlResult
     public typealias UnlockHandler =
@@ -286,4 +287,3 @@ private final class BootstrapServerReadyContinuationBox: @unchecked Sendable {
         }
     }
 }
-

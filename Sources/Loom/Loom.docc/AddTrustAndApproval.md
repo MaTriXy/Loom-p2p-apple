@@ -51,20 +51,14 @@ final class MyTrustProvider: LoomTrustProvider {
 
     func evaluateTrust(for peer: LoomPeerIdentity) async -> LoomTrustDecision {
         guard peer.isIdentityAuthenticated else { return .denied }
-        if trustStore.isTrusted(deviceID: peer.deviceID) { return .trusted }
+        if trustStore.isTrusted(peerIdentity: peer) { return .trusted }
         if let currentUserID, peer.iCloudUserID == currentUserID { return .trusted }
         return .requiresApproval
     }
 
     func grantTrust(to peer: LoomPeerIdentity) async throws {
-        trustStore.addTrustedDevice(
-            LoomTrustedDevice(
-                id: peer.deviceID,
-                name: peer.name,
-                deviceType: peer.deviceType,
-                trustedAt: Date()
-            )
-        )
+        let trustedDevice = try LoomTrustedDevice(peerIdentity: peer, trustedAt: Date())
+        trustStore.addTrustedDevice(trustedDevice)
     }
 
     func revokeTrust(for deviceID: UUID) async throws {

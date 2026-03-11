@@ -132,11 +132,11 @@ Connection order is deterministic:
 1. Local Loom-native direct path
 2. Relay-discovered QUIC direct path
 3. Relay-discovered TCP direct path
-4. OpenSSH fallback, if configured
+4. Emergency SSH, if explicitly enabled
 
-## Handle SSH fallback
+## Handle emergency SSH
 
-If the peer does not run the Loom host runtime, pass SSH credentials and a host-key policy.
+If the peer does not run the Loom host runtime, pass SSH credentials, an explicit host-CA trust configuration, and a blocking authorization handler.
 
 ```swift
 let sshAuth = LoomShellSSHAuthentication
@@ -148,11 +148,20 @@ let result = try await connector.connect(
     request: LoomShellSessionRequest(),
     bootstrapMetadata: bootstrapMetadata,
     sshAuthentication: sshAuth,
-    sshHostKeyPolicy: .metadataRequired
+    allowEmergencySSH: true,
+    sshServerTrust: LoomSSHServerTrustConfiguration(
+        trustedHostAuthorities: trustedHostAuthorities,
+        requiredPrincipal: LoomSSHServerTrustConfiguration.requiredPrincipal(
+            for: peer.deviceID
+        )
+    ),
+    authorizationHandler: { request in
+        .allowOnce
+    }
 )
 ```
 
-The app should keep SSH as a compatibility path, not as the primary transport, when both peers can speak Loom-native shell.
+The app should keep emergency SSH as a compatibility path, not as the primary transport, when both peers can speak Loom-native shell.
 
 ## Drive the session
 

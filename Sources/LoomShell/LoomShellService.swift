@@ -9,22 +9,25 @@ import Foundation
 import Loom
 
 /// Configuration for a LoomShell host service.
-public struct LoomShellServiceConfiguration: Sendable, Equatable {
+public struct LoomShellServiceConfiguration: Sendable {
     public let serviceName: String
     public let identity: LoomShellIdentity
     public let bootstrapMetadata: LoomBootstrapMetadata?
     public let supportsOpenSSHFallback: Bool
+    public let authorizationHandler: LoomShellAuthorizationHandler?
 
     public init(
         serviceName: String,
         identity: LoomShellIdentity,
         bootstrapMetadata: LoomBootstrapMetadata? = nil,
-        supportsOpenSSHFallback: Bool? = nil
+        supportsOpenSSHFallback: Bool? = nil,
+        authorizationHandler: LoomShellAuthorizationHandler? = nil
     ) {
         self.serviceName = serviceName
         self.identity = identity
         self.bootstrapMetadata = bootstrapMetadata
         self.supportsOpenSSHFallback = supportsOpenSSHFallback ?? (bootstrapMetadata?.enabled == true)
+        self.authorizationHandler = authorizationHandler
     }
 
     func capabilities(
@@ -160,7 +163,8 @@ public final class LoomShellService {
             serviceName: currentConfiguration.serviceName,
             identity: currentConfiguration.identity,
             bootstrapMetadata: bootstrapMetadata,
-            supportsOpenSSHFallback: supportsOpenSSHFallback
+            supportsOpenSSHFallback: supportsOpenSSHFallback,
+            authorizationHandler: currentConfiguration.authorizationHandler
         )
         self.currentConfiguration = updatedConfiguration
         let helloRequest = try await currentHelloRequest()
@@ -308,9 +312,15 @@ public final class LoomShellService {
     private func accept(session: LoomAuthenticatedSession) async {
         let taskID = UUID()
         let server = self.server
+        let authorizationHandler = currentConfiguration?.authorizationHandler
+        let trustProvider = node.trustProvider
         let task = Task { [weak self] in
             guard let self else { return }
-            await server.serve(session: session)
+            await server.serve(
+                session: session,
+                authorizationHandler: authorizationHandler,
+                trustProvider: trustProvider
+            )
             removeServingTask(taskID)
         }
         servingTasks[taskID] = task

@@ -19,7 +19,7 @@ struct LoomBootstrapClientTests {
             endpoint: endpoint,
             username: "ethan",
             password: "hunter2",
-            expectedHostKeyFingerprint: "SHA256:test",
+            serverTrust: LoomSSHTestFixtures.serverTrustConfiguration,
             timeout: .seconds(20)
         )
 
@@ -27,7 +27,7 @@ struct LoomBootstrapClientTests {
         #expect(call?.endpoint == endpoint)
         #expect(call?.username == "ethan")
         #expect(call?.password == "hunter2")
-        #expect(call?.expectedHostKeyFingerprint == "SHA256:test")
+        #expect(call?.serverTrust == LoomSSHTestFixtures.serverTrustConfiguration)
         #expect(call?.timeout == .seconds(20))
         #expect(result.unlocked)
     }
@@ -76,7 +76,7 @@ private struct SSHBootstrapCall: Sendable, Equatable {
     let endpoint: LoomBootstrapEndpoint
     let username: String
     let password: String
-    let expectedHostKeyFingerprint: String
+    let serverTrust: LoomSSHServerTrustConfiguration
     let timeout: Duration
 }
 
@@ -87,14 +87,14 @@ private actor SSHBootstrapClientSpy: LoomSSHBootstrapClient {
         endpoint: LoomBootstrapEndpoint,
         username: String,
         password: String,
-        expectedHostKeyFingerprint: String,
+        serverTrust: LoomSSHServerTrustConfiguration,
         timeout: Duration
     ) async throws -> LoomSSHBootstrapResult {
         lastCall = SSHBootstrapCall(
             endpoint: endpoint,
             username: username,
             password: password,
-            expectedHostKeyFingerprint: expectedHostKeyFingerprint,
+            serverTrust: serverTrust,
             timeout: timeout
         )
         return LoomSSHBootstrapResult(unlocked: true)
