@@ -73,7 +73,6 @@ public struct LoomBootstrapControlResult: Sendable, Equatable {
 }
 
 /// Cross-platform bootstrap control contract for daemon handoff and unlock requests.
-@available(*, deprecated, message: "Bootstrap control is weaker than SSH host-certificate bootstrap. Prefer LoomSSHBootstrapClient with LoomSSHServerTrustConfiguration.")
 public protocol LoomBootstrapControlClient: Sendable {
     func requestStatus(
         endpoint: LoomBootstrapEndpoint,
@@ -93,7 +92,6 @@ public protocol LoomBootstrapControlClient: Sendable {
 }
 
 /// Default bootstrap control transport based on a single line-delimited TCP request/response.
-@available(*, deprecated, message: "Bootstrap control is weaker than SSH host-certificate bootstrap. Prefer LoomSSHBootstrapClient with LoomSSHServerTrustConfiguration.")
 public struct LoomDefaultBootstrapControlClient: LoomBootstrapControlClient {
     private let fetchIdentity: @Sendable () async throws -> LoomAccountIdentity
     private let signPayload: @Sendable (Data) async throws -> Data
