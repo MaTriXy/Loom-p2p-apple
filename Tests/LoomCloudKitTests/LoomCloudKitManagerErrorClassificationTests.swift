@@ -27,6 +27,22 @@ struct LoomCloudKitManagerErrorClassificationTests {
         #expect(LoomCloudKitManager.isMissingPublishedIdentityLookupError(error))
     }
 
+    @Test("Nested partial failure unknown item errors are treated as missing published identities")
+    func nestedPartialFailureUnknownItemErrorsAreTreatedAsMissingPublishedIdentities() {
+        let nestedError = NSError(domain: CKError.errorDomain, code: CKError.unknownItem.rawValue)
+        let error = NSError(
+            domain: CKError.errorDomain,
+            code: CKError.partialFailure.rawValue,
+            userInfo: [
+                CKPartialErrorsByItemIDKey: [
+                    "device-record": nestedError,
+                ],
+            ]
+        )
+
+        #expect(LoomCloudKitManager.isMissingPublishedIdentityLookupError(error))
+    }
+
     @Test("Non-unknown item CloudKit errors remain actionable")
     func nonUnknownItemCloudKitErrorsRemainActionable() {
         let error = NSError(domain: CKError.errorDomain, code: CKError.networkFailure.rawValue)

@@ -22,6 +22,8 @@ await cloudKitManager.initialize()
 
 The manager defers container creation until `initialize()` so your app can tolerate missing CloudKit configuration more gracefully. Check `cloudKitManager.isAvailable` before assuming CloudKit-backed features exist.
 
+If your product publishes peer identity in CloudKit and also sends a device ID during handshakes, keep those paths on the same stable device ID. When migrating from older per-target defaults keys, move them into your shared device-ID slot before CloudKit initialization so the published identity record keeps lining up with the runtime handshake identity.
+
 ## Register your identity key
 
 If your product uses signed peer identities, register that public key with CloudKit so other trust layers can reason about the peer correctly.

@@ -471,8 +471,29 @@ extension LoomCloudKitManager {
     }
 
     nonisolated static func isMissingPublishedIdentityLookupError(_ error: any Error) -> Bool {
-        let nsError = error as NSError
-        return nsError.domain == CKError.errorDomain && nsError.code == CKError.unknownItem.rawValue
+        isMissingPublishedIdentityLookupError(error as NSError)
+    }
+
+    private nonisolated static func isMissingPublishedIdentityLookupError(_ error: NSError) -> Bool {
+        if error.domain == CKError.errorDomain && error.code == CKError.unknownItem.rawValue {
+            return true
+        }
+
+        if let underlyingError = error.userInfo[NSUnderlyingErrorKey] as? NSError,
+           isMissingPublishedIdentityLookupError(underlyingError) {
+            return true
+        }
+
+        if let partialErrors = error.userInfo[CKPartialErrorsByItemIDKey] as? [AnyHashable: Any] {
+            for value in partialErrors.values {
+                guard let nestedError = value as? NSError else { continue }
+                if isMissingPublishedIdentityLookupError(nestedError) {
+                    return true
+                }
+            }
+        }
+
+        return false
     }
 
     nonisolated static func sameAccountIdentityVerificationRetryDelay(afterAttempt attempt: Int) -> Duration? {
