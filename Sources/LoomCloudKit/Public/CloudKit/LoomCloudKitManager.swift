@@ -252,8 +252,7 @@ public final class LoomCloudKitManager {
     private func getOrCreateDeviceID() -> UUID {
         LoomSharedDeviceID.getOrCreate(
             suiteName: configuration.deviceIDSuiteName,
-            key: configuration.deviceIDKey,
-            legacyKeys: [configuration.deviceIDKey]
+            key: configuration.deviceIDKey
         )
     }
 

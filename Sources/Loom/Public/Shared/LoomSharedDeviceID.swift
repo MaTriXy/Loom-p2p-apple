@@ -16,8 +16,8 @@ import Foundation
 public enum LoomSharedDeviceID {
     /// UserDefaults key for the shared device ID.
     public static let key = "com.loom.shared.deviceID"
-    /// Legacy keys preserved for migration from older Loom layouts.
-    public static let legacyKeys = [
+    /// Deprecated per-target keys removed as part of the shared-ID cutover.
+    static let deprecatedKeys = [
         "com.loom.client.deviceID",
         "com.loom.cloudkit.deviceID",
     ]
@@ -26,32 +26,18 @@ public enum LoomSharedDeviceID {
     ///
     /// Priority:
     /// 1. Existing ID in shared App Group suite
-    /// 2. Migration from old per-app keys
-    /// 3. Create new ID
+    /// 2. Create new ID
     public static func getOrCreate(
         suiteName: String? = nil,
-        key: String = LoomSharedDeviceID.key,
-        legacyKeys: [String] = LoomSharedDeviceID.legacyKeys
+        key: String = LoomSharedDeviceID.key
     ) -> UUID {
         let sharedDefaults = userDefaults(suiteName: suiteName)
         let resolvedKey = key.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? Self.key : key
+        removeDeprecatedValues(from: sharedDefaults)
 
         if let stored = sharedDefaults.string(forKey: resolvedKey),
            let uuid = UUID(uuidString: stored) {
             return uuid
-        }
-
-        for oldKey in mergedLegacyKeys(legacyKeys) {
-            if let old = sharedDefaults.string(forKey: oldKey),
-               let uuid = UUID(uuidString: old) {
-                sharedDefaults.set(uuid.uuidString, forKey: resolvedKey)
-                return uuid
-            }
-            if let old = UserDefaults.standard.string(forKey: oldKey),
-               let uuid = UUID(uuidString: old) {
-                sharedDefaults.set(uuid.uuidString, forKey: resolvedKey)
-                return uuid
-            }
         }
 
         let newID = UUID()
@@ -59,12 +45,13 @@ public enum LoomSharedDeviceID {
         return newID
     }
 
-    private static func mergedLegacyKeys(_ additionalKeys: [String]) -> [String] {
-        var resolved: [String] = []
-        for candidate in additionalKeys + legacyKeys where !resolved.contains(candidate) {
-            resolved.append(candidate)
+    private static func removeDeprecatedValues(from sharedDefaults: UserDefaults) {
+        for deprecatedKey in deprecatedKeys {
+            sharedDefaults.removeObject(forKey: deprecatedKey)
+            if sharedDefaults !== UserDefaults.standard {
+                UserDefaults.standard.removeObject(forKey: deprecatedKey)
+            }
         }
-        return resolved
     }
 
     private static func userDefaults(suiteName: String?) -> UserDefaults {

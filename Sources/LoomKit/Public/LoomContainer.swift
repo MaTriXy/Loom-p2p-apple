@@ -119,7 +119,7 @@ public final class LoomContainer {
             hostClient = nil
         }
         #else
-        let hostClient: LoomHostClient? = nil
+        hostClient = nil
         #endif
         store = LoomStore(
             configuration: self.configuration,
