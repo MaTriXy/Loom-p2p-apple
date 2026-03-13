@@ -8,7 +8,6 @@
 import Foundation
 import Loom
 import LoomCloudKit
-import LoomHost
 
 /// Trust behavior used by the SwiftUI-first LoomKit container runtime.
 public enum LoomTrustMode: String, Codable, Sendable {
@@ -35,10 +34,10 @@ public struct LoomContainerConfiguration: Sendable {
     public let cloudKit: LoomCloudKitConfiguration?
     /// Optional overlay directory configuration used for off-LAN peer discovery.
     public let overlayDirectory: LoomOverlayDirectoryConfiguration?
-    /// Optional relay configuration used for remote hosting and remote joins.
+    /// Optional relay configuration used for remote reachability publication and remote joins.
     public let relay: LoomRelayConfiguration?
-    /// Optional macOS shared-host configuration used to share one Loom runtime across App Group apps.
-    public let sharedHost: LoomSharedHostConfiguration?
+    /// Optional macOS App Group configuration used to share one Loom runtime across multiple apps.
+    public let appGroup: LoomAppGroupConfiguration?
     /// Trust policy applied when evaluating nearby and CloudKit-backed peers.
     public let trust: LoomTrustMode
     /// Enables Bonjour peer-to-peer discovery when available on the platform.
@@ -64,7 +63,7 @@ public struct LoomContainerConfiguration: Sendable {
         cloudKit: LoomCloudKitConfiguration? = nil,
         overlayDirectory: LoomOverlayDirectoryConfiguration? = nil,
         relay: LoomRelayConfiguration? = nil,
-        sharedHost: LoomSharedHostConfiguration? = nil,
+        appGroup: LoomAppGroupConfiguration? = nil,
         trust: LoomTrustMode = .manualOnly,
         enablePeerToPeer: Bool = true,
         advertisementMetadata: [String: String] = [:],
@@ -80,7 +79,7 @@ public struct LoomContainerConfiguration: Sendable {
         self.cloudKit = cloudKit
         self.overlayDirectory = overlayDirectory
         self.relay = relay
-        self.sharedHost = sharedHost
+        self.appGroup = appGroup
         self.trust = trust
         self.enablePeerToPeer = enablePeerToPeer
         self.advertisementMetadata = advertisementMetadata

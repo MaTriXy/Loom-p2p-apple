@@ -9,7 +9,7 @@ import CloudKit
 import Foundation
 import Loom
 import LoomCloudKit
-import LoomHost
+import LoomSharedRuntime
 #if canImport(UIKit)
 import UIKit
 #endif
@@ -19,7 +19,8 @@ struct LoomStoreSnapshot: Sendable {
     let connections: [LoomConnectionSnapshot]
     let transfers: [LoomTransferSnapshot]
     let isRunning: Bool
-    let isRemoteHosting: Bool
+    let isPublishingRemoteReachability: Bool
+    let localPeerCapabilities: LoomPeerCapabilities
     let lastErrorMessage: String?
 }
 
@@ -96,6 +97,7 @@ actor LoomStore {
     private var relayHeartbeatTask: Task<Void, Never>?
     private var currentRemoteSessionID: String?
     private var currentPublicHostForTCP: String?
+    private var cachedBootstrapMetadata: LoomBootstrapMetadata?
     private var hostSnapshot: LoomHostStateSnapshot?
     private var hostStateTask: Task<Void, Never>?
     private var hostIncomingTask: Task<Void, Never>?
@@ -899,11 +901,11 @@ actor LoomStore {
     }
 
     private func makeHelloRequest() async throws -> LoomSessionHelloRequest {
-        let profile = await makeDeviceProfile()
+        let bootstrapMetadata = try await loadBootstrapMetadata()
+        let profile = await makeDeviceProfile(bootstrapMetadata: bootstrapMetadata)
         let identityKeyID = try await MainActor.run {
             try (node.identityManager ?? LoomIdentityManager.shared).currentIdentity().keyID
         }
-        let bootstrapMetadata = try await loadBootstrapMetadata()
 
         return try profile.makeHelloRequest(
             identityKeyID: identityKeyID,
@@ -917,11 +919,11 @@ actor LoomStore {
     }
 
     private func makeAdvertisement() async throws -> LoomPeerAdvertisement {
-        let profile = await makeDeviceProfile()
+        let bootstrapMetadata = try await loadBootstrapMetadata()
+        let profile = await makeDeviceProfile(bootstrapMetadata: bootstrapMetadata)
         let identityKeyID = try await MainActor.run {
             try (node.identityManager ?? LoomIdentityManager.shared).currentIdentity().keyID
         }
-        let bootstrapMetadata = try await loadBootstrapMetadata()
 
         return try profile.makeAdvertisement(
             identityKeyID: identityKeyID,
@@ -934,21 +936,48 @@ actor LoomStore {
         }
     }
 
-    private func makeDeviceProfile() async -> LoomDeviceProfile {
+    private func makeDeviceProfile(
+        bootstrapMetadata: LoomBootstrapMetadata?
+    ) async -> LoomDeviceProfile {
         LoomDeviceProfile(
             deviceID: deviceID,
             deviceName: configuration.serviceName,
-            deviceType: Self.currentDeviceType(),
+            deviceType: await Self.currentDeviceType(),
             iCloudUserID: await MainActor.run {
                 cloudKitManager?.currentUserRecordID
             },
             additionalAdvertisementMetadata: configuration.advertisementMetadata,
             additionalSupportedFeatures: configuration.supportedFeatures
+                + bootstrapSupportedFeatures(for: bootstrapMetadata)
         )
     }
 
     private func loadBootstrapMetadata() async throws -> LoomBootstrapMetadata? {
-        try await configuration.bootstrapMetadataProvider?()
+        let bootstrapMetadata = try await configuration.bootstrapMetadataProvider?()
+        cachedBootstrapMetadata = bootstrapMetadata
+        return bootstrapMetadata
+    }
+
+    private func bootstrapSupportedFeatures(
+        for bootstrapMetadata: LoomBootstrapMetadata?
+    ) -> [String] {
+        guard let bootstrapMetadata,
+              bootstrapMetadata.enabled else {
+            return []
+        }
+
+        var features: [String] = []
+        if bootstrapMetadata.wakeOnLAN != nil {
+            features.append("loom.bootstrap.wake-on-lan.v1")
+        }
+        if bootstrapMetadata.sshPort != nil {
+            features.append("loom.bootstrap.ssh-unlock.v1")
+        }
+        if bootstrapMetadata.supportsPreloginDaemon,
+           bootstrapMetadata.controlPort != nil {
+            features.append("loom.bootstrap.prelogin-control.v1")
+        }
+        return features
     }
 
     private func currentDirectTransports() -> [LoomDirectTransportAdvertisement] {
@@ -965,7 +994,8 @@ actor LoomStore {
     }
 
     private func currentSnapshot() -> LoomStoreSnapshot {
-        LoomStoreSnapshot(
+        let isPublishingRemoteReachability = hostSnapshot?.isRemoteHosting ?? isRemoteHosting
+        return LoomStoreSnapshot(
             peers: hostSnapshot.map { $0.peers.map(snapshot(fromHostRecord:)) } ?? mergedPeers(),
             connections: connectionSnapshots.values.sorted { lhs, rhs in
                 if lhs.connectedAt != rhs.connectedAt {
@@ -980,8 +1010,35 @@ actor LoomStore {
                 return lhs.id.uuidString < rhs.id.uuidString
             },
             isRunning: hostSnapshot?.isRunning ?? isRunning,
-            isRemoteHosting: hostSnapshot?.isRemoteHosting ?? isRemoteHosting,
+            isPublishingRemoteReachability: isPublishingRemoteReachability,
+            localPeerCapabilities: currentLocalPeerCapabilities(
+                isPublishingRemoteReachability: isPublishingRemoteReachability
+            ),
             lastErrorMessage: lastErrorMessage ?? hostSnapshot?.lastErrorMessage
+        )
+    }
+
+    private func currentLocalPeerCapabilities(
+        isPublishingRemoteReachability: Bool
+    ) -> LoomPeerCapabilities {
+        let supportsNearbyDirectConnections: Bool
+        if hostSnapshot != nil {
+            supportsNearbyDirectConnections = hostSnapshot?.isRunning ?? false
+        } else {
+            supportsNearbyDirectConnections = isRunning && listeningPorts.isEmpty == false
+        }
+
+        return LoomPeerCapabilities(
+            connectivity: LoomPeerConnectivityCapabilities(
+                supportsNearbyDirectConnections: supportsNearbyDirectConnections,
+                supportsRelayReachability: isPublishingRemoteReachability
+            ),
+            bootstrap: LoomPeerCapabilities(
+                advertisement: LoomPeerAdvertisement(),
+                remoteAccessEnabled: false,
+                relaySessionID: nil,
+                bootstrapMetadata: cachedBootstrapMetadata
+            ).bootstrap
         )
     }
 
@@ -1155,11 +1212,13 @@ actor LoomStore {
         }
     }
 
-    private static func currentDeviceType() -> DeviceType {
+    private static func currentDeviceType() async -> DeviceType {
         #if os(macOS)
         .mac
         #elseif os(iOS)
-        UIDevice.current.userInterfaceIdiom == .pad ? .iPad : .iPhone
+        await MainActor.run {
+            UIDevice.current.userInterfaceIdiom == .pad ? .iPad : .iPhone
+        }
         #elseif os(visionOS)
         .vision
         #else

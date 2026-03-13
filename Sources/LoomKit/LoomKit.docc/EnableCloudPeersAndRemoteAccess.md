@@ -18,7 +18,7 @@ When CloudKit is enabled, LoomKit merges nearby peers and CloudKit-visible peers
 
 ## Add Relay For Remote Joins
 
-Set ``LoomContainerConfiguration/relay`` when you want remote hosting outside the local network:
+Set ``LoomContainerConfiguration/relay`` when you want relay-backed remote reachability outside the local network:
 
 ```swift
 let configuration = LoomContainerConfiguration(
@@ -27,7 +27,7 @@ let configuration = LoomContainerConfiguration(
 )
 ```
 
-Call ``LoomContext/startRemoteHosting(sessionID:publicHostForTCP:)`` when the local device should publish relay-backed reachability. LoomKit republishes the current peer record so `remoteAccessEnabled` and `relaySessionID` stay aligned with the runtime's real state.
+Call ``LoomContext/publishRemoteReachability(sessionID:publicHostForTCP:)`` when the local device should publish relay-backed reachability. LoomKit republishes the current peer record so `remoteAccessEnabled` and `relaySessionID` stay aligned with the runtime's real state.
 
 ## Connection Preference Order
 
@@ -35,7 +35,7 @@ When you ask LoomKit to connect to a ``LoomPeerSnapshot``, it uses a fixed resol
 
 1. Nearby direct connection when the peer is currently available locally.
 2. Relay join when the peer publishes a `relaySessionID` and relay is configured.
-3. Bootstrap remains explicit through ``LoomContext/wake(_:)`` and ``LoomContext/requestUnlock(_:username:password:)``.
+3. Bootstrap remains explicit through ``LoomContext/bootstrap`` when a peer publishes recovery capability.
 
 That ordering matters because the app-facing API stays stable while LoomKit still prefers the fastest and lowest-latency path first.
 
@@ -51,7 +51,7 @@ See <doc:AddRemoteAccessAndSharingWithLoomKit> for a full walkthrough.
 
 ## macOS Shared Host Mode
 
-If multiple apps in one App Group should publish and connect through one shared Loom runtime, set ``LoomContainerConfiguration/sharedHost`` instead of spinning up independent network owners in each process.
+If multiple apps in one App Group should publish and connect through one shared Loom runtime, set ``LoomContainerConfiguration/appGroup`` instead of spinning up independent network owners in each process.
 
 That changes the runtime topology, not the app-facing API:
 
@@ -59,4 +59,4 @@ That changes the runtime topology, not the app-facing API:
 - Actions still go through ``LoomContext``.
 - Connections still arrive as ``LoomConnectionHandle`` values.
 
-See <doc:ShareOneLoomKitRuntimeAcrossApps> for the LoomKit-first setup flow, and see `LoomHost` for the underlying broker/runtime details.
+See <doc:ShareOneLoomKitRuntimeAcrossApps> for the LoomKit-first setup flow.

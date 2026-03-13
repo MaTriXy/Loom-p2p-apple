@@ -12,7 +12,7 @@ Use it when you want:
 - a main-actor `LoomContext` injected through SwiftUI environment values
 - live `@LoomQuery` peer, connection, and transfer snapshots in SwiftUI views
 - actor-backed `LoomConnectionHandle` values for messages, file transfer, and custom multiplexed streams
-- optional CloudKit-backed peer merging and relay-backed remote hosting without changing the app-facing API shape
+- optional CloudKit-backed peer merging and relay-backed remote reachability publication without changing the app-facing API shape
 - optional App Group-backed shared hosting on macOS when multiple apps should behave like one network host
 
 `LoomKit` sits above `Loom`:
@@ -25,6 +25,20 @@ The documentation is organized the same way:
 - start with <doc:AdoptLoomKitInSwiftUI> for the mental model
 - use <doc:LoomKitTutorials> for step-by-step integrations
 - drop into symbol reference pages when you need exact API behavior
+
+## Which Product Should I Use?
+
+- Use `LoomKit` when you want a SwiftUI-first, peer-centric runtime with one `LoomContainer`, a `LoomContext`, live queries, and connection handles.
+- Use `Loom` when you want to wire discovery, advertising, sessions, trust, or relay behavior yourself at a lower level.
+- Add `LoomCloudKit` when peer visibility or trust should flow through CloudKit-backed records and shares.
+- Use LoomKit's App Group configuration only for macOS setups where multiple apps should share one underlying Loom runtime.
+- Add `LoomShell` only when your product needs shell/bootstrap-oriented recovery flows above the core transport layer.
+
+## Platform Notes
+
+- Standalone `Loom` and `LoomKit` runtimes are intended for `macOS`, `iOS`, and `visionOS`.
+- LoomKit App Group mode is macOS-only by design.
+- Bootstrap and recovery features are optional. A peer can fully participate in LoomKit messaging and file transfer without publishing any bootstrap metadata.
 
 ## Topics
 

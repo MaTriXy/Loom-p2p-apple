@@ -14,6 +14,78 @@ import Testing
 @Suite("LoomKit Integration", .serialized)
 struct LoomKitIntegrationTests {
     @MainActor
+    @Test("iOS-shaped peers exchange messages in both directions")
+    func iosShapedPeersExchangeMessagesInBothDirections() async throws {
+        let pair = try await makeLoopbackPair(
+            clientDeviceType: .iPhone,
+            serverDeviceType: .iPad
+        )
+        defer {
+            Task {
+                await pair.stop()
+            }
+        }
+
+        async let clientContext = pair.client.start(
+            localHello: pair.clientHello,
+            identityManager: pair.clientIdentityManager
+        )
+        async let serverContext = pair.server.start(
+            localHello: pair.serverHello,
+            identityManager: pair.serverIdentityManager
+        )
+        _ = try await (clientContext, serverContext)
+
+        let clientHandle = makeHandle(
+            session: pair.client,
+            peerID: pair.serverHello.deviceID,
+            peerName: pair.serverHello.deviceName,
+            peerDeviceType: pair.serverHello.deviceType
+        )
+        let serverHandle = makeHandle(
+            session: pair.server,
+            peerID: pair.clientHello.deviceID,
+            peerName: pair.clientHello.deviceName,
+            peerDeviceType: pair.clientHello.deviceType
+        )
+        await clientHandle.startObservers()
+        await serverHandle.startObservers()
+
+        let serverReceiveTask = Task<Data?, Never> {
+            for await payload in serverHandle.messages {
+                return payload
+            }
+            return nil
+        }
+        let clientReceiveTask = Task<Data?, Never> {
+            for await payload in clientHandle.messages {
+                return payload
+            }
+            return nil
+        }
+
+        try await clientHandle.send("hello from iphone")
+        try await serverHandle.send("hello from ipad")
+
+        let serverPayload = try #require(
+            try await withTimeout(seconds: 2) {
+                await serverReceiveTask.value
+            }
+        )
+        let clientPayload = try #require(
+            try await withTimeout(seconds: 2) {
+                await clientReceiveTask.value
+            }
+        )
+
+        #expect(serverPayload == Data("hello from iphone".utf8))
+        #expect(clientPayload == Data("hello from ipad".utf8))
+
+        await clientHandle.disconnect()
+        await serverHandle.disconnect()
+    }
+
+    @MainActor
     @Test("Connection handles send messages on the default LoomKit stream")
     func connectionHandlesSendMessages() async throws {
         let pair = try await makeLoopbackPair()
@@ -36,12 +108,14 @@ struct LoomKitIntegrationTests {
         let clientHandle = makeHandle(
             session: pair.client,
             peerID: pair.serverHello.deviceID,
-            peerName: pair.serverHello.deviceName
+            peerName: pair.serverHello.deviceName,
+            peerDeviceType: pair.serverHello.deviceType
         )
         let serverHandle = makeHandle(
             session: pair.server,
             peerID: pair.clientHello.deviceID,
-            peerName: pair.clientHello.deviceName
+            peerName: pair.clientHello.deviceName,
+            peerDeviceType: pair.clientHello.deviceType
         )
         await clientHandle.startObservers()
         await serverHandle.startObservers()
@@ -89,12 +163,14 @@ struct LoomKitIntegrationTests {
         let clientHandle = makeHandle(
             session: pair.client,
             peerID: pair.serverHello.deviceID,
-            peerName: pair.serverHello.deviceName
+            peerName: pair.serverHello.deviceName,
+            peerDeviceType: pair.serverHello.deviceType
         )
         let serverHandle = makeHandle(
             session: pair.server,
             peerID: pair.clientHello.deviceID,
-            peerName: pair.clientHello.deviceName
+            peerName: pair.clientHello.deviceName,
+            peerDeviceType: pair.clientHello.deviceType
         )
         await clientHandle.startObservers()
         await serverHandle.startObservers()
@@ -184,17 +260,191 @@ struct LoomKitIntegrationTests {
     }
 
     @MainActor
+    @Test("One local runtime can send the same payload to multiple peers")
+    func oneLocalRuntimeCanSendSamePayloadToMultiplePeers() async throws {
+        let firstPair = try await makeLoopbackPair(
+            clientDeviceType: .iPhone,
+            serverDeviceType: .iPhone
+        )
+        let secondPair = try await makeLoopbackPair(
+            clientDeviceType: .iPhone,
+            serverDeviceType: .iPad
+        )
+        defer {
+            Task {
+                await firstPair.stop()
+                await secondPair.stop()
+            }
+        }
+
+        async let firstClientContext = firstPair.client.start(
+            localHello: firstPair.clientHello,
+            identityManager: firstPair.clientIdentityManager
+        )
+        async let firstServerContext = firstPair.server.start(
+            localHello: firstPair.serverHello,
+            identityManager: firstPair.serverIdentityManager
+        )
+        async let secondClientContext = secondPair.client.start(
+            localHello: secondPair.clientHello,
+            identityManager: secondPair.clientIdentityManager
+        )
+        async let secondServerContext = secondPair.server.start(
+            localHello: secondPair.serverHello,
+            identityManager: secondPair.serverIdentityManager
+        )
+        _ = try await (
+            firstClientContext,
+            firstServerContext,
+            secondClientContext,
+            secondServerContext
+        )
+
+        let firstClientHandle = makeHandle(
+            session: firstPair.client,
+            peerID: firstPair.serverHello.deviceID,
+            peerName: firstPair.serverHello.deviceName,
+            peerDeviceType: firstPair.serverHello.deviceType
+        )
+        let firstServerHandle = makeHandle(
+            session: firstPair.server,
+            peerID: firstPair.clientHello.deviceID,
+            peerName: firstPair.clientHello.deviceName,
+            peerDeviceType: firstPair.clientHello.deviceType
+        )
+        let secondClientHandle = makeHandle(
+            session: secondPair.client,
+            peerID: secondPair.serverHello.deviceID,
+            peerName: secondPair.serverHello.deviceName,
+            peerDeviceType: secondPair.serverHello.deviceType
+        )
+        let secondServerHandle = makeHandle(
+            session: secondPair.server,
+            peerID: secondPair.clientHello.deviceID,
+            peerName: secondPair.clientHello.deviceName,
+            peerDeviceType: secondPair.clientHello.deviceType
+        )
+        await firstClientHandle.startObservers()
+        await firstServerHandle.startObservers()
+        await secondClientHandle.startObservers()
+        await secondServerHandle.startObservers()
+
+        let payload = Data("mesh payload".utf8)
+        let firstReceiveTask = Task<Data?, Never> {
+            for await message in firstServerHandle.messages {
+                return message
+            }
+            return nil
+        }
+        let secondReceiveTask = Task<Data?, Never> {
+            for await message in secondServerHandle.messages {
+                return message
+            }
+            return nil
+        }
+
+        try await firstClientHandle.send(payload)
+        try await secondClientHandle.send(payload)
+
+        let firstReceived = try #require(
+            try await withTimeout(seconds: 2) {
+                await firstReceiveTask.value
+            }
+        )
+        let secondReceived = try #require(
+            try await withTimeout(seconds: 2) {
+                await secondReceiveTask.value
+            }
+        )
+
+        #expect(firstReceived == payload)
+        #expect(secondReceived == payload)
+    }
+
+    @MainActor
+    @Test("Peer snapshots derive connectivity and bootstrap capabilities")
+    func peerSnapshotsDeriveCapabilities() {
+        let bootstrapMetadata = LoomBootstrapMetadata(
+            enabled: true,
+            supportsPreloginDaemon: true,
+            endpoints: [.init(host: "studio.example.com", port: 22, source: .user)],
+            sshPort: 22,
+            controlPort: 9849,
+            wakeOnLAN: .init(
+                macAddress: "AA:BB:CC:DD:EE:FF",
+                broadcastAddresses: ["192.168.1.255"]
+            )
+        )
+        let peer = LoomPeerSnapshot(
+            id: UUID(),
+            name: "Studio iPad",
+            deviceType: .iPad,
+            sources: [.nearby, .relay],
+            isNearby: true,
+            isShared: false,
+            remoteAccessEnabled: true,
+            relaySessionID: "studio-ipad",
+            advertisement: LoomPeerAdvertisement(
+                deviceType: .iPad,
+                directTransports: [
+                    LoomDirectTransportAdvertisement(
+                        transportKind: .tcp,
+                        port: 4040
+                    )
+                ]
+            ),
+            bootstrapMetadata: bootstrapMetadata,
+            lastSeen: Date()
+        )
+
+        #expect(peer.capabilities.connectivity.supportsNearbyDirectConnections)
+        #expect(peer.capabilities.connectivity.supportsRelayReachability)
+        #expect(peer.capabilities.bootstrap.supportsWakeOnLAN)
+        #expect(peer.capabilities.bootstrap.supportsSSHUnlock)
+        #expect(peer.capabilities.bootstrap.supportsPreloginControl)
+    }
+
+    @MainActor
+    @Test("Bootstrap coordinator rejects peers without published recovery capability")
+    func bootstrapCoordinatorRejectsUnsupportedPeers() async throws {
+        let container = try LoomContainer(
+            for: LoomContainerConfiguration(serviceName: "Test Phone")
+        )
+        let peer = LoomPeerSnapshot(
+            id: UUID(),
+            name: "Peer",
+            deviceType: .iPhone,
+            sources: [.nearby],
+            isNearby: true,
+            isShared: false,
+            remoteAccessEnabled: false,
+            relaySessionID: nil,
+            advertisement: LoomPeerAdvertisement(
+                deviceID: UUID(),
+                deviceType: .iPhone
+            ),
+            bootstrapMetadata: nil,
+            lastSeen: Date()
+        )
+
+        await #expect(throws: LoomKitError.self) {
+            try await container.mainContext.bootstrap.wake(peer)
+        }
+    }
+
+    @MainActor
     private func makeHandle(
         session: LoomAuthenticatedSession,
         peerID: UUID,
-        peerName: String
+        peerName: String,
+        peerDeviceType: DeviceType
     ) -> LoomConnectionHandle {
         LoomConnectionHandle(
             id: UUID(),
             peer: LoomPeerSnapshot(
                 id: peerID,
                 name: peerName,
-                deviceType: .mac,
+                deviceType: peerDeviceType,
                 sources: [.nearby],
                 isNearby: true,
                 isShared: false,
@@ -202,7 +452,7 @@ struct LoomKitIntegrationTests {
                 relaySessionID: nil,
                 advertisement: LoomPeerAdvertisement(
                     deviceID: peerID,
-                    deviceType: .mac
+                    deviceType: peerDeviceType
                 ),
                 bootstrapMetadata: nil,
                 lastSeen: Date()
@@ -234,6 +484,17 @@ private struct LoomKitLoopbackSessionPair {
 
 @MainActor
 private func makeLoopbackPair() async throws -> LoomKitLoopbackSessionPair {
+    try await makeLoopbackPair(
+        clientDeviceType: .mac,
+        serverDeviceType: .mac
+    )
+}
+
+@MainActor
+private func makeLoopbackPair(
+    clientDeviceType: DeviceType,
+    serverDeviceType: DeviceType
+) async throws -> LoomKitLoopbackSessionPair {
     let clientIdentityManager = LoomIdentityManager(
         service: "com.ethanlipnik.loom.tests.loomkit-client.\(UUID().uuidString)",
         account: "p256-signing",
@@ -287,14 +548,14 @@ private func makeLoopbackPair() async throws -> LoomKitLoopbackSessionPair {
     let clientHello = LoomSessionHelloRequest(
         deviceID: UUID(),
         deviceName: "Client",
-        deviceType: .mac,
-        advertisement: LoomPeerAdvertisement(deviceType: .mac)
+        deviceType: clientDeviceType,
+        advertisement: LoomPeerAdvertisement(deviceType: clientDeviceType)
     )
     let serverHello = LoomSessionHelloRequest(
         deviceID: UUID(),
         deviceName: "Server",
-        deviceType: .mac,
-        advertisement: LoomPeerAdvertisement(deviceType: .mac)
+        deviceType: serverDeviceType,
+        advertisement: LoomPeerAdvertisement(deviceType: serverDeviceType)
     )
 
     return LoomKitLoopbackSessionPair(

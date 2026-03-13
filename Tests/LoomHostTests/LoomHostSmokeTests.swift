@@ -1,7 +1,7 @@
 import Testing
 
-@Suite("LoomHost Smoke")
-struct LoomHostSmokeTests {
+@Suite("LoomSharedRuntime Smoke")
+struct LoomSharedRuntimeSmokeTests {
     @Test("Target loads")
     func targetLoads() {}
 }

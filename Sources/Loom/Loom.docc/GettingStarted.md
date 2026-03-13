@@ -8,6 +8,20 @@ Use this guide to get a real Loom integration off the ground. The short version 
 
 That is the same boundary `MirageKit` uses. Its host and client services both own a ``LoomNode``, but the handshake schema, stream model, CloudKit policy, and UI all live above Loom.
 
+## Which Product Or Target Should I Start With?
+
+- Start with `LoomKit` if your app is SwiftUI-first and you want a peer-centric runtime with one container, one context, live queries, and actor-backed connection handles.
+- Start with `Loom` if you need to own discovery, advertising, trust, or transport wiring directly.
+- Add `LoomCloudKit` when peers or trust decisions should be visible through CloudKit-backed records and shares.
+- Use LoomKit's App Group configuration only for macOS setups where multiple apps should share one underlying runtime.
+- Add `LoomShell` only when your product needs shell/bootstrap-oriented recovery behavior above the core transport layer.
+
+Platform boundaries are intentional:
+
+- Standalone `Loom` and `LoomKit` runtimes are cross-platform across `macOS`, `iOS`, and `visionOS`.
+- App Group-backed shared runtime mode is macOS-only.
+- Bootstrap features are optional. A peer can advertise, connect, transfer files, and participate fully in LoomKit without any SSH or Wake-on-LAN metadata.
+
 ## Start with LoomKit for SwiftUI apps
 
 If you want something modeled more like SwiftData than like a pile of networking services, use the `LoomKit` product first.
@@ -63,7 +77,7 @@ struct ContentView: View {
 }
 ```
 
-That is the recommended entry point for most SwiftUI apps. Once a connection exists, you still own protocol semantics and product behavior above LoomKit.
+That is the recommended entry point for most SwiftUI apps. LoomKit stays peer-centric here: no device has to be modeled as the primary host. Once a connection exists, you still own protocol semantics and product behavior above LoomKit.
 
 ## Build from Loom primitives when you need total control
 

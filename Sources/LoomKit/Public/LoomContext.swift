@@ -22,10 +22,14 @@ public final class LoomContext {
     public private(set) var transfers: [LoomTransferSnapshot] = []
     /// Indicates whether the shared Loom runtime is active.
     public private(set) var isRunning = false
-    /// Indicates whether relay-backed remote hosting is currently enabled.
-    public private(set) var isRemoteHosting = false
+    /// Indicates whether this local peer is currently publishing relay-backed reachability.
+    public private(set) var isPublishingRemoteReachability = false
+    /// Current capability projection for the local peer runtime.
+    public private(set) var localPeerCapabilities: LoomPeerCapabilities = .none
     /// Last runtime error projected into the UI layer.
     public private(set) var lastError: LoomKitError?
+    /// Optional recovery surface for peers that publish bootstrap metadata.
+    public let bootstrap: LoomBootstrapCoordinator
 
     /// Stream of newly accepted incoming connections.
     public nonisolated let incomingConnections: AsyncStream<LoomConnectionHandle>
@@ -37,6 +41,7 @@ public final class LoomContext {
 
     init(store: LoomStore) {
         self.store = store
+        bootstrap = LoomBootstrapCoordinator(store: store)
         let (incomingConnections, incomingConnectionsContinuation) = AsyncStream.makeStream(of: LoomConnectionHandle.self)
         self.incomingConnections = incomingConnections
         self.incomingConnectionsContinuation = incomingConnectionsContinuation
@@ -102,8 +107,8 @@ public final class LoomContext {
         await store.disconnect(connectionID: connection.id)
     }
 
-    /// Starts relay-backed remote hosting for the local peer.
-    public func startRemoteHosting(
+    /// Publishes relay-backed remote reachability for the local peer.
+    public func publishRemoteReachability(
         sessionID: String,
         publicHostForTCP: String? = nil
     ) async throws {
@@ -113,29 +118,9 @@ public final class LoomContext {
         )
     }
 
-    /// Stops relay-backed remote hosting for the local peer.
-    public func stopRemoteHosting() async {
+    /// Stops publishing relay-backed remote reachability for the local peer.
+    public func stopPublishingRemoteReachability() async {
         await store.stopRemoteHosting()
-    }
-
-    /// Sends Wake-on-LAN packets using the selected peer's published bootstrap metadata.
-    public func wake(_ peer: LoomPeerSnapshot) async throws {
-        try await store.wake(peer)
-    }
-
-    /// Requests a bootstrap unlock flow for the selected peer.
-    public func requestUnlock(
-        _ peer: LoomPeerSnapshot,
-        username: String,
-        password: String,
-        sshServerTrust: LoomSSHServerTrustConfiguration
-    ) async throws -> LoomBootstrapControlResult {
-        try await store.requestUnlock(
-            peer,
-            username: username,
-            password: password,
-            sshServerTrust: sshServerTrust
-        )
     }
 
     /// Creates or returns the current CloudKit share for the local peer publication.
@@ -153,7 +138,8 @@ public final class LoomContext {
         connections = snapshot.connections
         transfers = snapshot.transfers
         isRunning = snapshot.isRunning
-        isRemoteHosting = snapshot.isRemoteHosting
+        isPublishingRemoteReachability = snapshot.isPublishingRemoteReachability
+        localPeerCapabilities = snapshot.localPeerCapabilities
         lastError = snapshot.lastErrorMessage.map(LoomKitError.init(message:))
     }
 }

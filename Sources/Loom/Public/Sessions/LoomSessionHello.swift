@@ -100,7 +100,6 @@ public struct LoomSessionHelloRequest: Sendable, Equatable {
         "loom.handshake.v1",
         "loom.session-encryption.v1",
         "loom.streams.v1",
-        "loom.bootstrap.v1",
     ]
 }
 

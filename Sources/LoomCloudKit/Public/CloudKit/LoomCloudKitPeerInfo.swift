@@ -25,6 +25,16 @@ public struct LoomCloudKitPeerInfo: Identifiable, Hashable, Sendable {
     public let relaySessionID: String?
     public let bootstrapMetadata: LoomBootstrapMetadata?
 
+    /// Typed capability view derived from the peer's current publication state.
+    public var capabilities: LoomPeerCapabilities {
+        LoomPeerCapabilities(
+            advertisement: advertisement,
+            remoteAccessEnabled: remoteAccessEnabled,
+            relaySessionID: relaySessionID,
+            bootstrapMetadata: bootstrapMetadata
+        )
+    }
+
     public var deviceID: UUID {
         id.deviceID
     }

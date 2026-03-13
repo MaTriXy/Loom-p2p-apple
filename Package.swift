@@ -34,8 +34,8 @@ let package = Package(
             targets: ["LoomKit"]
         ),
         .library(
-            name: "LoomHost",
-            targets: ["LoomHost"]
+            name: "LoomSharedRuntime",
+            targets: ["LoomSharedRuntime"]
         ),
     ],
     dependencies: [
@@ -76,15 +76,16 @@ let package = Package(
             dependencies: [
                 "Loom",
                 "LoomCloudKit",
-                "LoomHost",
+                "LoomSharedRuntime",
             ]
         ),
         .target(
-            name: "LoomHost",
+            name: "LoomSharedRuntime",
             dependencies: [
                 "Loom",
                 "LoomCloudKit",
-            ]
+            ],
+            path: "Sources/LoomHost"
         ),
         .testTarget(
             name: "LoomTests",
@@ -103,8 +104,9 @@ let package = Package(
             dependencies: ["LoomKit"]
         ),
         .testTarget(
-            name: "LoomHostTests",
-            dependencies: ["LoomHost"]
+            name: "LoomSharedRuntimeTests",
+            dependencies: ["LoomSharedRuntime"],
+            path: "Tests/LoomHostTests"
         ),
     ]
 )

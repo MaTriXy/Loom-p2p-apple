@@ -34,7 +34,7 @@ public enum LoomPeerSource: String, Codable, CaseIterable, Hashable, Sendable {
     case cloudKitOwn
     /// Peer record visible through an accepted CloudKit share.
     case cloudKitShared
-    /// Relay-backed remote host currently reachable by session ID.
+    /// Relay-backed remote peer currently reachable by session ID.
     case relay
 }
 
@@ -63,7 +63,7 @@ public struct LoomPeerSnapshot: Identifiable, Hashable, Sendable {
     /// Timestamp of the most recent observation for this peer.
     public let lastSeen: Date
 
-    /// Convenience access to the host device backing this peer.
+    /// Convenience access to the underlying device backing this peer.
     public var deviceID: UUID {
         id.deviceID
     }
@@ -71,6 +71,16 @@ public struct LoomPeerSnapshot: Identifiable, Hashable, Sendable {
     /// Optional app identifier when the peer was synthesized from a shared host.
     public var appID: String? {
         id.appID
+    }
+
+    /// Typed capability view derived from the peer's current publication state.
+    public var capabilities: LoomPeerCapabilities {
+        LoomPeerCapabilities(
+            advertisement: advertisement,
+            remoteAccessEnabled: remoteAccessEnabled,
+            relaySessionID: relaySessionID,
+            bootstrapMetadata: bootstrapMetadata
+        )
     }
 
     /// Creates a UI snapshot for one logical peer merged across nearby and CloudKit sources.

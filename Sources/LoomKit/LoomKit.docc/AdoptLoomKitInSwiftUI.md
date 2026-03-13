@@ -1,6 +1,6 @@
 # Adopt LoomKit in SwiftUI
 
-Use `LoomKit` when you want Loom's nearby discovery, authenticated sessions, transfer engine, optional CloudKit peer sharing, optional relay reachability, and optional macOS shared-host mode to show up in SwiftUI as one coherent runtime.
+Use `LoomKit` when you want Loom's nearby discovery, authenticated sessions, transfer engine, optional CloudKit peer sharing, optional relay reachability publication, and optional macOS shared-host mode to show up in SwiftUI as one coherent runtime.
 
 `LoomKit` is intentionally modeled after SwiftData:
 
@@ -38,7 +38,17 @@ struct ExampleApp: App {
 
 With `autostart` left at its default value of `true`, LoomKit starts the shared runtime when the scene appears and stops it when the scene goes away.
 
-On macOS, the same container surface can also opt into an App Group-scoped shared host through ``LoomContainerConfiguration/sharedHost``. That lets multiple apps keep one network owner while the SwiftUI layer still talks only to `LoomContext`, `LoomQuery`, and `LoomConnectionHandle`.
+On macOS, the same container surface can also opt into an App Group-scoped shared runtime through ``LoomContainerConfiguration/appGroup``. That lets multiple apps keep one network owner while the SwiftUI layer still talks only to `LoomContext`, `LoomQuery`, and `LoomConnectionHandle`.
+
+## Choose The Right Product
+
+- Use `LoomKit` for SwiftUI-first apps that want a peer-centric runtime.
+- Drop to `Loom` when you need to own discovery, advertising, or transport wiring directly.
+- Add `LoomCloudKit` when peers should survive beyond a local session and flow through CloudKit.
+- Use LoomKit's App Group configuration only on macOS when multiple apps in one App Group should share one runtime.
+- Add `LoomShell` only for shell/bootstrap features that are separate from core peer messaging.
+
+`LoomKit` does not require a primary host concept. Each standalone device is just a peer that can connect, accept incoming sessions, and hold multiple active connections at once.
 
 ## Read Snapshots In Views
 

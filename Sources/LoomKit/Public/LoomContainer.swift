@@ -8,7 +8,7 @@
 import Foundation
 import Loom
 import LoomCloudKit
-import LoomHost
+import LoomSharedRuntime
 
 /// Shared LoomKit runtime container modeled after SwiftData's `ModelContainer`.
 @MainActor
@@ -38,7 +38,7 @@ public final class LoomContainer {
             cloudKit: configuration.cloudKit,
             overlayDirectory: configuration.overlayDirectory,
             relay: configuration.relay,
-            sharedHost: configuration.sharedHost,
+            appGroup: configuration.appGroup,
             trust: configuration.trust,
             enablePeerToPeer: configuration.enablePeerToPeer,
             advertisementMetadata: configuration.advertisementMetadata,
@@ -95,7 +95,17 @@ public final class LoomContainer {
         let overlayDirectoryConfiguration = self.configuration.overlayDirectory
         let hostClient: LoomHostClient?
         #if os(macOS)
-        if let sharedHost = self.configuration.sharedHost {
+        if let appGroup = self.configuration.appGroup {
+            let sharedHost = LoomSharedHostConfiguration(
+                appGroupIdentifier: appGroup.appGroupIdentifier,
+                app: LoomHostAppDescriptor(
+                    appID: appGroup.app.appID,
+                    displayName: appGroup.app.displayName,
+                    metadata: appGroup.app.metadata,
+                    supportedFeatures: appGroup.app.supportedFeatures
+                ),
+                socketName: appGroup.socketName
+            )
             hostClient = LoomHostClient(
                 configuration: sharedHost,
                 runtimeFactory: {

@@ -12,7 +12,7 @@
 
         @Steps {
             @Step {
-                Create a `LoomSharedHostConfiguration` with the App Group identifier and the current app's `LoomHostAppDescriptor`.
+                Create a ``LoomAppGroupConfiguration`` with the App Group identifier and the current app's ``LoomAppGroupAppDescriptor``.
                 @Code(name: "StudioApp.swift", file: ShareOneLoomKitRuntimeAcrossMacOSApps-App-01.swift)
             }
 

@@ -20,7 +20,7 @@
     }
 
     @Chapter(name: "Cloud and Relay Reachability") {
-        Use this chapter when your app needs CloudKit-backed peer sharing, relay-backed remote hosting, or both.
+        Use this chapter when your app needs CloudKit-backed peer sharing, relay-backed remote reachability publication, or both.
 
         @Image(source: "TutorialCloudAndRelay.svg", alt: "Diagram of LoomKit merging nearby peers, CloudKit visibility, and relay reachability into one peer model.")
 

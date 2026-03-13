@@ -1,8 +1,8 @@
-import LoomHost
+import LoomKit
 
-let sharedHost = LoomSharedHostConfiguration(
+let appGroup = LoomAppGroupConfiguration(
     appGroupIdentifier: "group.com.example.studio",
-    app: LoomHostAppDescriptor(
+    app: LoomAppGroupAppDescriptor(
         appID: "com.example.studio.mac",
         displayName: "Studio",
         metadata: ["role": "editor"],

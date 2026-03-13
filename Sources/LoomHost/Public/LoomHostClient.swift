@@ -460,12 +460,70 @@ package struct LoomHostSocketLayout: Sendable {
     package let lockURL: URL
 }
 #else
+package struct LoomHostClientConnection: Sendable {
+    package let descriptor: LoomHostConnectionDescriptor
+    package let session: any LoomSessionProtocol
+}
+
 /// Client for the App Group-scoped shared-host broker.
 public actor LoomHostClient {
     public let configuration: LoomSharedHostConfiguration
 
     public init(configuration: LoomSharedHostConfiguration) {
         self.configuration = configuration
+    }
+
+    package func makeStateStream() -> AsyncStream<LoomHostStateSnapshot> {
+        AsyncStream { continuation in
+            continuation.yield(
+                LoomHostStateSnapshot(
+                    peers: [],
+                    isRunning: false,
+                    isRemoteHosting: false,
+                    lastErrorMessage: LoomHostError.unsupportedPlatform.localizedDescription
+                )
+            )
+            continuation.finish()
+        }
+    }
+
+    package func makeIncomingConnectionStream() -> AsyncStream<LoomHostClientConnection> {
+        AsyncStream { continuation in
+            continuation.finish()
+        }
+    }
+
+    package func start() async throws {
+        throw LoomHostError.unsupportedPlatform
+    }
+
+    package func stop() async {}
+
+    package func refreshPeers() async throws {
+        throw LoomHostError.unsupportedPlatform
+    }
+
+    package func startRemoteHosting(
+        sessionID: String,
+        publicHostForTCP: String?
+    ) async throws {
+        throw LoomHostError.unsupportedPlatform
+    }
+
+    package func stopRemoteHosting() async throws {
+        throw LoomHostError.unsupportedPlatform
+    }
+
+    package func connect(to peerID: LoomPeerID) async throws -> LoomHostClientConnection {
+        throw LoomHostError.unsupportedPlatform
+    }
+
+    package func connect(remoteSessionID: String) async throws -> LoomHostClientConnection {
+        throw LoomHostError.unsupportedPlatform
+    }
+
+    package func disconnect(connectionID: UUID) async throws {
+        throw LoomHostError.unsupportedPlatform
     }
 }
 #endif

@@ -10,11 +10,11 @@ struct RemoteAccessView: View {
 
     var body: some View {
         List {
-            Section("Hosting") {
-                Button("Start Remote Hosting") {
+            Section("Reachability") {
+                Button("Publish Remote Reachability") {
                     Task {
                         do {
-                            try await loomContext.startRemoteHosting(
+                            try await loomContext.publishRemoteReachability(
                                 sessionID: "studio-mac",
                                 publicHostForTCP: "studio.example.com"
                             )
@@ -25,10 +25,10 @@ struct RemoteAccessView: View {
                     }
                 }
 
-                Button("Stop Remote Hosting") {
+                Button("Stop Publishing Reachability") {
                     Task {
-                        await loomContext.stopRemoteHosting()
-                        statusLine = "Stopped remote hosting"
+                        await loomContext.stopPublishingRemoteReachability()
+                        statusLine = "Stopped publishing relay reachability"
                     }
                 }
             }

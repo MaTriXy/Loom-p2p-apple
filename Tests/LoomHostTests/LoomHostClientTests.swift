@@ -1,10 +1,10 @@
 @testable import Loom
-@testable import LoomHost
+@testable import LoomSharedRuntime
 import Foundation
 import Testing
 
-@Suite("LoomHost Client", .serialized)
-struct LoomHostClientTests {
+@Suite("LoomSharedRuntime Client", .serialized)
+struct LoomSharedRuntimeClientTests {
     @Test("Client registers against a running broker over a shared Unix socket")
     func clientRegistersAgainstRunningBroker() async throws {
         let temporaryDirectory = FileManager.default.temporaryDirectory

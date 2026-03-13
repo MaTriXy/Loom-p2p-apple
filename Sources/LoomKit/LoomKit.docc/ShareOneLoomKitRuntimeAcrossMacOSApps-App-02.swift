@@ -1,4 +1,3 @@
-import LoomHost
 import LoomKit
 import SwiftUI
 
@@ -9,9 +8,9 @@ struct StudioApp: App {
             serviceType: "_studio._tcp",
             serviceName: "Studio Mac",
             deviceIDSuiteName: "group.com.example.studio.device",
-            sharedHost: LoomSharedHostConfiguration(
+            appGroup: LoomAppGroupConfiguration(
                 appGroupIdentifier: "group.com.example.studio",
-                app: LoomHostAppDescriptor(
+                app: LoomAppGroupAppDescriptor(
                     appID: "com.example.studio.mac",
                     displayName: "Studio",
                     metadata: ["role": "editor"],
