@@ -128,13 +128,17 @@ public final class LoomNode {
             role: .initiator,
             transportKind: transportKind
         )
-        _ = try await session.start(
-            localHello: hello,
-            identityManager: identityManager,
-            trustProvider: trustProvider,
-            queue: queue
-        )
-        return session
+        return try await withTaskCancellationHandler {
+            _ = try await session.start(
+                localHello: hello,
+                identityManager: identityManager,
+                trustProvider: trustProvider,
+                queue: queue
+            )
+            return session
+        } onCancel: {
+            connection.cancel()
+        }
     }
 
     public func startAuthenticatedAdvertising(
