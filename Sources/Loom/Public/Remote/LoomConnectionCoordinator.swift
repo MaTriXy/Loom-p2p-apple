@@ -109,7 +109,7 @@ public final class LoomConnectionCoordinator {
         }
     }
 
-    package init(
+    public init(
         node: LoomNode,
         relayClient: LoomRelayClient? = nil,
         policy: LoomDirectConnectionPolicy? = nil,
