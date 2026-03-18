@@ -2,7 +2,7 @@
 //  LoomPeerCapabilities.swift
 //  Loom
 //
-//  Created by Codex on 3/13/26.
+//  Created by Ethan Lipnik on 3/13/26.
 //
 
 import Foundation
@@ -11,15 +11,15 @@ import Foundation
 public struct LoomPeerConnectivityCapabilities: Hashable, Sendable, Codable {
     /// Whether the peer currently publishes one or more direct local-network transports.
     public let supportsNearbyDirectConnections: Bool
-    /// Whether the peer currently publishes relay-backed remote reachability.
-    public let supportsRelayReachability: Bool
+    /// Whether the peer currently publishes remote signaling-backed reachability.
+    public let supportsRemoteSignalingReachability: Bool
 
     public init(
         supportsNearbyDirectConnections: Bool = false,
-        supportsRelayReachability: Bool = false
+        supportsRemoteSignalingReachability: Bool = false
     ) {
         self.supportsNearbyDirectConnections = supportsNearbyDirectConnections
-        self.supportsRelayReachability = supportsRelayReachability
+        self.supportsRemoteSignalingReachability = supportsRemoteSignalingReachability
     }
 
     public static let none = LoomPeerConnectivityCapabilities()
@@ -63,14 +63,14 @@ public struct LoomPeerCapabilities: Hashable, Sendable, Codable {
     public init(
         advertisement: LoomPeerAdvertisement,
         remoteAccessEnabled: Bool,
-        relaySessionID: String?,
+        signalingSessionID: String?,
         bootstrapMetadata: LoomBootstrapMetadata?
     ) {
         let bootstrapEnabled = bootstrapMetadata?.enabled == true
         self.init(
             connectivity: LoomPeerConnectivityCapabilities(
                 supportsNearbyDirectConnections: advertisement.directTransports.isEmpty == false,
-                supportsRelayReachability: remoteAccessEnabled && relaySessionID?.isEmpty == false
+                supportsRemoteSignalingReachability: remoteAccessEnabled && signalingSessionID?.isEmpty == false
             ),
             bootstrap: LoomPeerBootstrapCapabilities(
                 supportsWakeOnLAN: bootstrapEnabled && bootstrapMetadata?.wakeOnLAN != nil,

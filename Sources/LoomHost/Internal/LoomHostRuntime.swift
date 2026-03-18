@@ -2,7 +2,7 @@
 //  LoomHostRuntime.swift
 //  LoomHost
 //
-//  Created by Codex on 3/10/26.
+//  Created by Ethan Lipnik on 3/10/26.
 //
 
 import CloudKit
@@ -25,7 +25,7 @@ package struct LoomHostRuntimeDependencies: Sendable {
     package let cloudKitManager: LoomCloudKitManager?
     package let peerProvider: LoomCloudKitPeerProvider?
     package let shareManager: LoomCloudKitShareManager?
-    package let relayClient: LoomRelayClient?
+    package let signalingClient: LoomRemoteSignalingClient?
     package let overlayDirectoryConfiguration: LoomOverlayDirectoryConfiguration?
     package let connectionCoordinator: LoomConnectionCoordinator
     package let bootstrapMetadataProvider: (@Sendable () async throws -> LoomBootstrapMetadata?)?
@@ -40,7 +40,7 @@ package struct LoomHostRuntimeDependencies: Sendable {
         cloudKitManager: LoomCloudKitManager?,
         peerProvider: LoomCloudKitPeerProvider?,
         shareManager: LoomCloudKitShareManager?,
-        relayClient: LoomRelayClient?,
+        signalingClient: LoomRemoteSignalingClient?,
         overlayDirectoryConfiguration: LoomOverlayDirectoryConfiguration?,
         connectionCoordinator: LoomConnectionCoordinator,
         bootstrapMetadataProvider: (@Sendable () async throws -> LoomBootstrapMetadata?)?,
@@ -54,7 +54,7 @@ package struct LoomHostRuntimeDependencies: Sendable {
         self.cloudKitManager = cloudKitManager
         self.peerProvider = peerProvider
         self.shareManager = shareManager
-        self.relayClient = relayClient
+        self.signalingClient = signalingClient
         self.overlayDirectoryConfiguration = overlayDirectoryConfiguration
         self.connectionCoordinator = connectionCoordinator
         self.bootstrapMetadataProvider = bootstrapMetadataProvider
@@ -86,7 +86,7 @@ package actor LoomHostRuntime {
     private var overlayPeersByID: [LoomPeerID: LoomPeer] = [:]
     private var overlayPeerLastSeen: [LoomPeerID: Date] = [:]
     private var cloudPeersByID: [LoomPeerID: LoomCloudKitPeerInfo] = [:]
-    private var relayHeartbeatTask: Task<Void, Never>?
+    private var signalingHeartbeatTask: Task<Void, Never>?
     private var currentRemoteSessionID: String?
     private var currentPublicHostForTCP: String?
     private var registeredApps: [String: LoomHostAppDescriptor] = [:]
@@ -231,12 +231,12 @@ package actor LoomHostRuntime {
     }
 
     package func stop() async {
-        relayHeartbeatTask?.cancel()
-        relayHeartbeatTask = nil
+        signalingHeartbeatTask?.cancel()
+        signalingHeartbeatTask = nil
 
         if let currentRemoteSessionID,
-           let relayClient = dependencies.relayClient {
-            try? await relayClient.closePeerSession(sessionID: currentRemoteSessionID)
+           let signalingClient = dependencies.signalingClient {
+            try? await signalingClient.closePeerSession(sessionID: currentRemoteSessionID)
         }
         currentRemoteSessionID = nil
         currentPublicHostForTCP = nil
@@ -289,8 +289,8 @@ package actor LoomHostRuntime {
         sessionID: String,
         publicHostForTCP: String?
     ) async throws {
-        guard let relayClient = dependencies.relayClient else {
-            throw LoomHostError.remoteFailure("The shared-host relay configuration is unavailable.")
+        guard let signalingClient = dependencies.signalingClient else {
+            throw LoomHostError.remoteFailure("The shared-host remote signaling configuration is unavailable.")
         }
         if !isRunning {
             try await startIfNeeded()
@@ -307,7 +307,7 @@ package actor LoomHostRuntime {
             publicHostForTCP: publicHostForTCP
         )
         let advertisement = try await makeAdvertisement()
-        try await relayClient.advertisePeerSession(
+        try await signalingClient.advertisePeerSession(
             sessionID: trimmedSessionID,
             peerID: dependencies.deviceID,
             acceptingConnections: true,
@@ -319,10 +319,10 @@ package actor LoomHostRuntime {
         currentPublicHostForTCP = publicHostForTCP
         isRemoteHosting = true
 
-        relayHeartbeatTask?.cancel()
-        relayHeartbeatTask = Task { [weak self] in
+        signalingHeartbeatTask?.cancel()
+        signalingHeartbeatTask = Task { [weak self] in
             guard let self else { return }
-            await self.runRelayHeartbeat(sessionID: trimmedSessionID)
+            await self.runSignalingHeartbeat(sessionID: trimmedSessionID)
         }
 
         try await publishCurrentPeer()
@@ -330,12 +330,12 @@ package actor LoomHostRuntime {
     }
 
     package func stopRemoteHosting() async {
-        relayHeartbeatTask?.cancel()
-        relayHeartbeatTask = nil
+        signalingHeartbeatTask?.cancel()
+        signalingHeartbeatTask = nil
 
         if let currentRemoteSessionID,
-           let relayClient = dependencies.relayClient {
-            try? await relayClient.closePeerSession(sessionID: currentRemoteSessionID)
+           let signalingClient = dependencies.signalingClient {
+            try? await signalingClient.closePeerSession(sessionID: currentRemoteSessionID)
         }
 
         currentRemoteSessionID = nil
@@ -361,13 +361,13 @@ package actor LoomHostRuntime {
         let resolvedPeer = currentPeerRecord(for: peerID)
         let localPeer = localPeersByID[peerID]
         let overlayPeer = localPeer == nil ? overlayPeersByID[peerID] : nil
-        let relaySessionID = LoomConnectionCoordinator.relayFallbackSessionID(
-            advertisedRelaySessionID: resolvedPeer?.relaySessionID,
+        let signalingSessionID = LoomConnectionCoordinator.signalingFallbackSessionID(
+            advertisedSignalingSessionID: resolvedPeer?.signalingSessionID,
             localPeer: localPeer,
             overlayPeer: overlayPeer
         )
 
-        guard localPeer != nil || overlayPeer != nil || relaySessionID != nil else {
+        guard localPeer != nil || overlayPeer != nil || signalingSessionID != nil else {
             throw LoomHostError.peerNotFound(peerID)
         }
 
@@ -379,12 +379,12 @@ package actor LoomHostRuntime {
             hello: hello,
             localPeer: localPeer,
             overlayPeer: overlayPeer,
-            relaySessionID: relaySessionID
+            signalingSessionID: signalingSessionID
         )
         let peer = try await resolveConnectedPeer(
             preferredPeer: resolvedPeer,
             session: session,
-            relaySessionID: relaySessionID
+            signalingSessionID: signalingSessionID
         )
         return LoomHostEstablishedSession(peer: peer, session: session)
     }
@@ -401,8 +401,8 @@ package actor LoomHostRuntime {
             throw LoomHostError.protocolViolation("Shared-host remote session ID must not be empty.")
         }
 
-        if let relayClient = dependencies.relayClient {
-            try await relayClient.joinSession(sessionID: trimmedSessionID)
+        if let signalingClient = dependencies.signalingClient {
+            try await signalingClient.joinSession(sessionID: trimmedSessionID)
         }
 
         do {
@@ -413,17 +413,17 @@ package actor LoomHostRuntime {
             let session = try await dependencies.connectionCoordinator.connect(
                 hello: hello,
                 localPeer: nil,
-                relaySessionID: trimmedSessionID
+                signalingSessionID: trimmedSessionID
             )
             let peer = try await resolveConnectedPeer(
                 preferredPeer: nil,
                 session: session,
-                relaySessionID: trimmedSessionID
+                signalingSessionID: trimmedSessionID
             )
             return LoomHostEstablishedSession(peer: peer, session: session)
         } catch {
-            if let relayClient = dependencies.relayClient {
-                try? await relayClient.leaveSession(sessionID: trimmedSessionID)
+            if let signalingClient = dependencies.signalingClient {
+                try? await signalingClient.leaveSession(sessionID: trimmedSessionID)
             }
             throw error
         }
@@ -435,7 +435,7 @@ package actor LoomHostRuntime {
         try await resolveConnectedPeer(
             preferredPeer: nil,
             session: session,
-            relaySessionID: nil
+            signalingSessionID: nil
         )
     }
 
@@ -447,13 +447,13 @@ package actor LoomHostRuntime {
         await dependencies.node.updateAdvertisement(advertisement)
         try await publishCurrentPeer()
         if let currentRemoteSessionID,
-           let relayClient = dependencies.relayClient {
+           let signalingClient = dependencies.signalingClient {
             let peerCandidates = await LoomDirectCandidateCollector.collect(
                 configuration: await MainActor.run { dependencies.node.configuration },
                 listeningPorts: listeningPorts,
                 publicHostForTCP: currentPublicHostForTCP
             )
-            try await relayClient.peerHeartbeat(
+            try await signalingClient.peerHeartbeat(
                 sessionID: currentRemoteSessionID,
                 acceptingConnections: true,
                 peerCandidates: peerCandidates,
@@ -463,10 +463,10 @@ package actor LoomHostRuntime {
         }
     }
 
-    private func runRelayHeartbeat(sessionID: String) async {
+    private func runSignalingHeartbeat(sessionID: String) async {
         while !Task.isCancelled {
             do {
-                guard let relayClient = dependencies.relayClient else {
+                guard let signalingClient = dependencies.signalingClient else {
                     return
                 }
                 let peerCandidates = await LoomDirectCandidateCollector.collect(
@@ -475,7 +475,7 @@ package actor LoomHostRuntime {
                     publicHostForTCP: currentPublicHostForTCP
                 )
                 let advertisement = try await makeAdvertisement()
-                try await relayClient.peerHeartbeat(
+                try await signalingClient.peerHeartbeat(
                     sessionID: sessionID,
                     acceptingConnections: true,
                     peerCandidates: peerCandidates,
@@ -485,9 +485,9 @@ package actor LoomHostRuntime {
                 if let shareManager = dependencies.shareManager {
                     await shareManager.updateLastSeen()
                 }
-            } catch let relayError as LoomRelayError {
-                await record(relayError)
-                if relayError.isPermanentConfigurationFailure {
+            } catch let signalingError as LoomRemoteSignalingError {
+                await record(signalingError)
+                if signalingError.isPermanentConfigurationFailure {
                     await stopRemoteHosting()
                     return
                 }
@@ -521,7 +521,7 @@ package actor LoomHostRuntime {
             advertisement: advertisement,
             identityPublicKey: identity.publicKey,
             remoteAccessEnabled: isRemoteHosting,
-            relaySessionID: currentRemoteSessionID,
+            signalingSessionID: currentRemoteSessionID,
             bootstrapMetadata: try await loadBootstrapMetadata()
         )
         await refreshCloudPeers()
@@ -626,8 +626,8 @@ package actor LoomHostRuntime {
         }
         if let cloudPeer {
             sources.append(cloudPeer.isShared ? .cloudKitShared : .cloudKitOwn)
-            if cloudPeer.relaySessionID != nil {
-                sources.append(.relay)
+            if cloudPeer.signalingSessionID != nil {
+                sources.append(.remoteSignaling)
             }
         }
 
@@ -648,7 +648,7 @@ package actor LoomHostRuntime {
             isNearby: localPeer != nil,
             isShared: cloudPeer?.isShared ?? false,
             remoteAccessEnabled: cloudPeer?.remoteAccessEnabled ?? false,
-            relaySessionID: cloudPeer?.relaySessionID,
+            signalingSessionID: cloudPeer?.signalingSessionID,
             advertisement: advertisement,
             bootstrapMetadata: bootstrapMetadata,
             lastSeen: lastSeen
@@ -658,7 +658,7 @@ package actor LoomHostRuntime {
     private func resolveConnectedPeer(
         preferredPeer: LoomHostPeerRecord?,
         session: LoomAuthenticatedSession,
-        relaySessionID: String?
+        signalingSessionID: String?
     ) async throws -> LoomHostPeerRecord {
         if let preferredPeer {
             return preferredPeer
@@ -682,11 +682,11 @@ package actor LoomHostRuntime {
             id: peerID,
             name: sessionContext.peerIdentity.name,
             deviceType: sessionContext.peerIdentity.deviceType,
-            sources: relaySessionID == nil ? [] : [.relay],
+            sources: signalingSessionID == nil ? [] : [.remoteSignaling],
             isNearby: false,
             isShared: false,
-            remoteAccessEnabled: relaySessionID != nil,
-            relaySessionID: relaySessionID,
+            remoteAccessEnabled: signalingSessionID != nil,
+            signalingSessionID: signalingSessionID,
             advertisement: LoomPeerAdvertisement(
                 deviceID: sessionContext.peerIdentity.deviceID,
                 identityKeyID: sessionContext.peerIdentity.identityKeyID,

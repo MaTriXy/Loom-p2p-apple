@@ -36,7 +36,7 @@ public extension LoomLogCategory {
     static let discovery: Self = "discovery"
     static let transport: Self = "transport"
     static let transfer: Self = "transfer"
-    static let relay: Self = "relay"
+    static let remoteSignaling: Self = "remote_signaling"
     static let identity: Self = "identity"
     static let security: Self = "security"
     static let trust: Self = "trust"
@@ -50,7 +50,7 @@ public extension LoomLogCategory {
         .discovery,
         .transport,
         .transfer,
-        .relay,
+        .remoteSignaling,
         .identity,
         .security,
         .trust,
@@ -64,7 +64,7 @@ public extension LoomLogCategory {
         .discovery,
         .transport,
         .transfer,
-        .relay,
+        .remoteSignaling,
         .trust,
         .cloud,
     ]

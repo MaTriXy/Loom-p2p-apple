@@ -1,5 +1,5 @@
 //
-//  LoomRelayClient.swift
+//  LoomRemoteSignalingClient.swift
 //  Loom
 //
 //  Created by Ethan Lipnik on 2/10/26.
@@ -11,7 +11,7 @@ import CryptoKit
 import Foundation
 
 /// Additional app-scoped authentication for signaling requests.
-public struct LoomRelayAppAuthentication: Sendable {
+public struct LoomRemoteSignalingAppAuthentication: Sendable {
     public let appID: String
     public let sharedSecret: String
 
@@ -27,10 +27,10 @@ public struct LoomRelayAppAuthentication: Sendable {
 }
 
 /// Configuration for the remote signaling service endpoint.
-public struct LoomRelayConfiguration: Sendable {
+public struct LoomRemoteSignalingConfiguration: Sendable {
     public let baseURL: URL
     public let requestTimeout: TimeInterval
-    public let appAuthentication: LoomRelayAppAuthentication
+    public let appAuthentication: LoomRemoteSignalingAppAuthentication
     public let headerPrefix: String
 
     /// Creates signaling client configuration.
@@ -43,7 +43,7 @@ public struct LoomRelayConfiguration: Sendable {
     public init(
         baseURL: URL,
         requestTimeout: TimeInterval = 5,
-        appAuthentication: LoomRelayAppAuthentication,
+        appAuthentication: LoomRemoteSignalingAppAuthentication,
         headerPrefix: String = "x-loom"
     ) {
         self.baseURL = baseURL
@@ -55,11 +55,11 @@ public struct LoomRelayConfiguration: Sendable {
     /// Placeholder configuration for consumers that have not wired an app-owned endpoint.
     ///
     /// App targets should provide an explicit base URL for their own signaling service.
-    public static var `default`: LoomRelayConfiguration {
-        LoomRelayConfiguration(
+    public static var `default`: LoomRemoteSignalingConfiguration {
+        LoomRemoteSignalingConfiguration(
             baseURL: URL(string: "https://example.invalid") ?? URL(fileURLWithPath: "/"),
             requestTimeout: 5,
-            appAuthentication: LoomRelayAppAuthentication(
+            appAuthentication: LoomRemoteSignalingAppAuthentication(
                 appID: "invalid",
                 sharedSecret: "invalid"
             ),
@@ -74,14 +74,14 @@ public struct LoomRelayConfiguration: Sendable {
 }
 
 /// Transport type for a remote connectivity candidate.
-public enum LoomRelayCandidateTransport: String, Sendable, Codable {
+public enum LoomRemoteCandidateTransport: String, Sendable, Codable {
     case tcp
     case quic
 }
 
 /// Remote endpoint candidate published by signaling.
-public struct LoomRelayCandidate: Sendable, Codable, Hashable {
-    public let transport: LoomRelayCandidateTransport
+public struct LoomRemoteCandidate: Sendable, Codable, Hashable {
+    public let transport: LoomRemoteCandidateTransport
     public let address: String
     public let port: UInt16
 
@@ -92,7 +92,7 @@ public struct LoomRelayCandidate: Sendable, Codable, Hashable {
     ///   - address: Candidate hostname or IP.
     ///   - port: Candidate listening port.
     public init(
-        transport: LoomRelayCandidateTransport,
+        transport: LoomRemoteCandidateTransport,
         address: String,
         port: UInt16
     ) {
@@ -103,11 +103,12 @@ public struct LoomRelayCandidate: Sendable, Codable, Hashable {
 }
 
 /// Presence state returned by remote signaling.
-public struct LoomRelayPresenceStatus: Sendable {
+public struct LoomRemotePresenceStatus: Sendable {
     public let exists: Bool
     public let acceptingConnections: Bool
     public let advertisement: LoomPeerAdvertisement?
-    public let peerCandidates: [LoomRelayCandidate]
+    public let peerCandidates: [LoomRemoteCandidate]
+    public let clientCandidates: [LoomRemoteCandidate]
     public let lockedToParticipantKeyID: String?
     public let expiresAt: Date?
     public let lastPeerSeen: Date?
@@ -128,7 +129,8 @@ public struct LoomRelayPresenceStatus: Sendable {
         exists: Bool,
         acceptingConnections: Bool,
         advertisement: LoomPeerAdvertisement? = nil,
-        peerCandidates: [LoomRelayCandidate] = [],
+        peerCandidates: [LoomRemoteCandidate] = [],
+        clientCandidates: [LoomRemoteCandidate] = [],
         lockedToParticipantKeyID: String? = nil,
         expiresAt: Date? = nil,
         lastPeerSeen: Date? = nil,
@@ -138,6 +140,7 @@ public struct LoomRelayPresenceStatus: Sendable {
         self.acceptingConnections = acceptingConnections
         self.advertisement = advertisement
         self.peerCandidates = peerCandidates
+        self.clientCandidates = clientCandidates
         self.lockedToParticipantKeyID = lockedToParticipantKeyID
         self.expiresAt = expiresAt
         self.lastPeerSeen = lastPeerSeen
@@ -146,7 +149,7 @@ public struct LoomRelayPresenceStatus: Sendable {
 }
 
 /// Remote signaling errors.
-public enum LoomRelayError: LocalizedError, Sendable {
+public enum LoomRemoteSignalingError: LocalizedError, Sendable {
     case invalidConfiguration
     case invalidResponse
     case invalidPayload
@@ -189,8 +192,8 @@ public enum LoomRelayError: LocalizedError, Sendable {
 
 /// Signed signaling API wrapper used by peer and participant remote coordination.
 @MainActor
-public final class LoomRelayClient {
-    private let configuration: LoomRelayConfiguration
+public final class LoomRemoteSignalingClient {
+    private let configuration: LoomRemoteSignalingConfiguration
     private let identityManager: LoomIdentityManager
     private let urlSession: URLSession
 
@@ -201,7 +204,7 @@ public final class LoomRelayClient {
     ///   - identityManager: Identity provider used for key-based request signatures.
     ///   - urlSession: Session used for HTTP requests.
     public init(
-        configuration: LoomRelayConfiguration,
+        configuration: LoomRemoteSignalingConfiguration,
         identityManager: LoomIdentityManager = .shared,
         urlSession: URLSession = .shared
     ) {
@@ -224,25 +227,25 @@ public final class LoomRelayClient {
     ///
     /// - Note: The client retries heartbeat once if a concurrent peer create
     ///   races and returns `session_exists`.
+    @discardableResult
     public func advertisePeerSession(
         sessionID: String,
         peerID: UUID,
         acceptingConnections: Bool,
-        peerCandidates: [LoomRelayCandidate],
+        peerCandidates: [LoomRemoteCandidate],
         advertisement: LoomPeerAdvertisement? = nil,
         ttlSeconds: Int = 360
     )
-    async throws {
+    async throws -> HeartbeatResult {
         do {
-            try await peerHeartbeat(
+            return try await peerHeartbeat(
                 sessionID: sessionID,
                 acceptingConnections: acceptingConnections,
                 peerCandidates: peerCandidates,
                 advertisement: advertisement,
                 ttlSeconds: ttlSeconds
             )
-            return
-        } catch let error as LoomRelayError {
+        } catch let error as LoomRemoteSignalingError {
             guard case let .http(statusCode, errorCode, _) = error,
                   statusCode == 404,
                   errorCode == "session_not_found" else {
@@ -259,32 +262,38 @@ public final class LoomRelayClient {
                 advertisement: advertisement,
                 ttlSeconds: ttlSeconds
             )
-        } catch let error as LoomRelayError {
+        } catch let error as LoomRemoteSignalingError {
             if case let .http(_, errorCode, _) = error, errorCode == "session_exists" {
-                try await peerHeartbeat(
+                return try await peerHeartbeat(
                     sessionID: sessionID,
                     acceptingConnections: acceptingConnections,
                     peerCandidates: peerCandidates,
                     advertisement: advertisement,
                     ttlSeconds: ttlSeconds
                 )
-                return
             }
             throw error
         }
+        return HeartbeatResult(clientCandidates: [])
     }
 
     /// Sends a peer heartbeat to maintain presence.
     ///
     /// Call this periodically while the peer listener is active.
+    /// Result returned from a heartbeat request, including client candidates for hole-punching.
+    public struct HeartbeatResult: Sendable {
+        public let clientCandidates: [LoomRemoteCandidate]
+    }
+
+    @discardableResult
     public func peerHeartbeat(
         sessionID: String,
         acceptingConnections: Bool? = nil,
-        peerCandidates: [LoomRelayCandidate]? = nil,
+        peerCandidates: [LoomRemoteCandidate]? = nil,
         advertisement: LoomPeerAdvertisement? = nil,
         ttlSeconds: Int? = nil
     )
-    async throws {
+    async throws -> HeartbeatResult {
         var body: [String: Any] = ["role": "host"]
         if let acceptingConnections {
             body["remoteEnabled"] = acceptingConnections
@@ -299,12 +308,14 @@ public final class LoomRelayClient {
             body["advertisementBlob"] = advertisementBlob
         }
         let bodyData = try JSONSerialization.data(withJSONObject: body)
-        _ = try await sendSignedRequest(
+        let (_, responseData) = try await sendSignedRequest(
             sessionID: sessionID,
             method: "POST",
             path: "/v1/session/heartbeat",
             bodyData: bodyData
         )
+        let object = (try? JSONSerialization.jsonObject(with: responseData)) as? [String: Any] ?? [:]
+        return HeartbeatResult(clientCandidates: parseCandidates(object["clientCandidates"]))
     }
 
     /// Closes a peer signaling session.
@@ -323,13 +334,29 @@ public final class LoomRelayClient {
 
     /// Joins a peer session and reserves the single-participant signaling lock.
     ///
-    /// - Parameter sessionID: Session identifier to join.
-    public func joinSession(sessionID: String) async throws {
+    /// - Parameters:
+    ///   - sessionID: Session identifier to join.
+    ///   - clientCandidates: STUN-discovered endpoints the host can use for hole-punching.
+    public func joinSession(
+        sessionID: String,
+        clientCandidates: [LoomRemoteCandidate] = []
+    ) async throws {
+        var body: [String: Any] = [:]
+        if !clientCandidates.isEmpty {
+            body["clientCandidates"] = clientCandidates.map { candidate in
+                [
+                    "transport": candidate.transport.rawValue,
+                    "address": candidate.address,
+                    "port": candidate.port,
+                ] as [String: Any]
+            }
+        }
+        let bodyData = try JSONSerialization.data(withJSONObject: body)
         _ = try await sendSignedRequest(
             sessionID: sessionID,
             method: "POST",
             path: "/v1/session/join",
-            bodyData: Data("{}".utf8)
+            bodyData: bodyData
         )
     }
 
@@ -358,7 +385,7 @@ public final class LoomRelayClient {
     /// guard presence.exists, presence.acceptingConnections else { return }
     /// let candidates = presence.peerCandidates
     /// ```
-    public func fetchPresence(sessionID: String) async throws -> LoomRelayPresenceStatus {
+    public func fetchPresence(sessionID: String) async throws -> LoomRemotePresenceStatus {
         let (_, data) = try await sendSignedRequest(
             sessionID: sessionID,
             method: "GET",
@@ -366,18 +393,20 @@ public final class LoomRelayClient {
             bodyData: nil
         )
         guard let object = try JSONSerialization.jsonObject(with: data) as? [String: Any] else {
-            throw LoomRelayError.invalidPayload
+            throw LoomRemoteSignalingError.invalidPayload
         }
         let exists = object["exists"] as? Bool ?? false
         let peerCandidates = parseCandidates(object["peerCandidates"] ?? object["hostCandidates"])
+        let clientCandidates = parseCandidates(object["clientCandidates"])
         let acceptingConnections = object["remoteEnabled"] as? Bool ??
             object["acceptingConnections"] as? Bool ??
             false
-        return LoomRelayPresenceStatus(
+        return LoomRemotePresenceStatus(
             exists: exists,
             acceptingConnections: acceptingConnections && !peerCandidates.isEmpty,
             advertisement: parseAdvertisementBlob(object["advertisementBlob"]),
             peerCandidates: peerCandidates,
+            clientCandidates: clientCandidates,
             lockedToParticipantKeyID: object["lockedToParticipantKeyID"] as? String ?? object["lockedToClientKeyID"] as? String,
             expiresAt: dateFromMilliseconds(object["expiresAtMs"]),
             lastPeerSeen: dateFromMilliseconds(object["lastPeerSeenMs"] ?? object["lastHostSeenMs"]),
@@ -389,7 +418,7 @@ public final class LoomRelayClient {
         sessionID: String,
         peerID: UUID,
         acceptingConnections: Bool,
-        peerCandidates: [LoomRelayCandidate],
+        peerCandidates: [LoomRemoteCandidate],
         advertisement: LoomPeerAdvertisement?,
         ttlSeconds: Int
     )
@@ -420,14 +449,14 @@ public final class LoomRelayClient {
     )
     async throws -> (HTTPURLResponse, Data) {
         guard configuration.baseURL.scheme == "https" else {
-            throw LoomRelayError.invalidConfiguration
+            throw LoomRemoteSignalingError.invalidConfiguration
         }
         let identity = try identityManager.currentIdentity()
         let nonce = UUID().uuidString.lowercased()
         let timestampMs = LoomIdentitySigning.currentTimestampMs()
         let bodyHash = Self.sha256Hex(bodyData ?? Data("-".utf8))
         let appAuthentication = configuration.appAuthentication
-        LoomLogger.relay(
+        LoomLogger.remoteSignaling(
             "Remote signaling request \(method.uppercased()) \(path) session=\(sessionID) keyID=\(identity.keyID) bodyBytes=\(bodyData?.count ?? 0)"
         )
         let appAuthPayload = Self.appAuthPayload(
@@ -475,22 +504,22 @@ public final class LoomRelayClient {
 
         let (data, response) = try await urlSession.data(for: request)
         guard let http = response as? HTTPURLResponse else {
-            LoomLogger.error(.relay, "Remote signaling invalid response for \(method.uppercased()) \(path)")
-            throw LoomRelayError.invalidResponse
+            LoomLogger.error(.remoteSignaling, "Remote signaling invalid response for \(method.uppercased()) \(path)")
+            throw LoomRemoteSignalingError.invalidResponse
         }
 
         guard (200 ... 299).contains(http.statusCode) else {
             let parsed = parseErrorPayload(data)
-            LoomLogger.debug(.relay,
+            LoomLogger.debug(.remoteSignaling,
                 "Remote signaling HTTP \(http.statusCode) \(method.uppercased()) \(path) error=\(parsed.errorCode ?? "none") detail=\(parsed.detail ?? "none")"
             )
-            throw LoomRelayError.http(
+            throw LoomRemoteSignalingError.http(
                 statusCode: http.statusCode,
                 errorCode: parsed.errorCode,
                 detail: parsed.detail
             )
         }
-        LoomLogger.relay(
+        LoomLogger.remoteSignaling(
             "Remote signaling success \(method.uppercased()) \(path) status=\(http.statusCode) bytes=\(data.count)"
         )
 
@@ -539,7 +568,7 @@ public final class LoomRelayClient {
         return Data(signature).base64EncodedString()
     }
 
-    private func encodeCandidates(_ candidates: [LoomRelayCandidate]) -> [[String: Any]] {
+    private func encodeCandidates(_ candidates: [LoomRemoteCandidate]) -> [[String: Any]] {
         candidates.map { candidate in
             [
                 "transport": candidate.transport.rawValue,
@@ -581,20 +610,20 @@ private func dateFromMilliseconds(_ rawValue: Any?) -> Date? {
     return nil
 }
 
-private func parseCandidates(_ rawValue: Any?) -> [LoomRelayCandidate] {
+private func parseCandidates(_ rawValue: Any?) -> [LoomRemoteCandidate] {
     guard let array = rawValue as? [[String: Any]] else {
         return []
     }
     return array.compactMap { candidateObject in
         guard let transportRaw = candidateObject["transport"] as? String,
-              let transport = LoomRelayCandidateTransport(rawValue: transportRaw),
+              let transport = LoomRemoteCandidateTransport(rawValue: transportRaw),
               let address = candidateObject["address"] as? String else {
             return nil
         }
 
         if let intPort = candidateObject["port"] as? Int,
            let port = UInt16(exactly: intPort) {
-            return LoomRelayCandidate(
+            return LoomRemoteCandidate(
                 transport: transport,
                 address: address,
                 port: port
@@ -603,7 +632,7 @@ private func parseCandidates(_ rawValue: Any?) -> [LoomRelayCandidate] {
 
         if let int64Port = candidateObject["port"] as? Int64,
            let port = UInt16(exactly: int64Port) {
-            return LoomRelayCandidate(
+            return LoomRemoteCandidate(
                 transport: transport,
                 address: address,
                 port: port

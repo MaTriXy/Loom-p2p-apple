@@ -57,16 +57,16 @@ print(startup.ports)
 - capability publication in advertisements
 - consistent session hello generation for new peers
 
-## Publish remote access through the relay
+## Publish remote access through remote signaling
 
-When you want remote reachability without turning the relay into a TURN service, publish direct candidates and heartbeat them through your app-owned signaling service.
+When you want remote reachability without turning the signaling service into a TURN service, publish direct candidates and heartbeat them through your app-owned signaling service.
 
 ```swift
-let relayClient = LoomRelayClient(configuration: relayConfiguration)
+let signalingClient = LoomRemoteSignalingClient(configuration: signalingConfiguration)
 
 let remoteAccess = try await service.startRemoteAccess(
     sessionID: remoteSessionID,
-    relayClient: relayClient,
+    signalingClient: signalingClient,
     publicTCPHost: publicHostNameIfYouWantTCPFallback
 )
 
@@ -76,10 +76,10 @@ print(remoteAccess.peerCandidates)
 `startRemoteAccess` does three important things:
 
 - collects direct candidates using the actual bound listener ports
-- advertises them through the relay as peer presence
+- advertises them through remote signaling as peer presence
 - keeps the session alive with heartbeats until you call `stopRemoteAccess`
 
-That means the relay stays control-plane only. Payload traffic still goes directly over Loom-native transport.
+That means remote signaling stays control-plane only. Payload traffic still goes directly over Loom-native transport.
 
 ## Discover and connect from a client
 
@@ -101,7 +101,7 @@ discovery.startDiscovery()
 Then connect with one policy-driven connector.
 
 ```swift
-let connector = LoomShellConnector(node: node, relayClient: relayClient)
+let connector = LoomShellConnector(node: node, signalingClient: signalingClient)
 
 let clientIdentity = LoomShellIdentity(
     deviceID: myStableDeviceID,

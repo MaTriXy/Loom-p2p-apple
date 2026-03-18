@@ -66,7 +66,7 @@ struct LoomSharedRuntimeClientTests {
                     cloudKitManager: nil,
                     peerProvider: nil,
                     shareManager: nil,
-                    relayClient: nil,
+                    signalingClient: nil,
                     overlayDirectoryConfiguration: nil,
                     connectionCoordinator: connectionCoordinator,
                     bootstrapMetadataProvider: nil,

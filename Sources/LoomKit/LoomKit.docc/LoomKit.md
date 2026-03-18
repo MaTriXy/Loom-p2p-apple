@@ -40,6 +40,8 @@ The documentation is organized the same way:
 - LoomKit App Group mode is macOS-only by design.
 - Bootstrap and recovery features are optional. A peer can fully participate in LoomKit messaging and file transfer without publishing any bootstrap metadata.
 
+> Important: Your app's Info.plist must declare `NSBonjourServices` (with your service type) and `NSLocalNetworkUsageDescription` for discovery to work. Without these keys, Bonjour operations fail with error `-65555 (NoAuth)`. See the Loom documentation article "Configure Local Network Access" for the full setup.
+
 ## Topics
 
 ### Essentials

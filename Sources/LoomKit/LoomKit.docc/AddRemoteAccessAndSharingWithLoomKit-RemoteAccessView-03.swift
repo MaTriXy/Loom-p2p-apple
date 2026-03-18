@@ -18,7 +18,7 @@ struct RemoteAccessView: View {
                                 sessionID: "studio-mac",
                                 publicHostForTCP: "studio.example.com"
                             )
-                            statusLine = "Publishing relay presence"
+                            statusLine = "Publishing remote signaling presence"
                         } catch {
                             statusLine = error.localizedDescription
                         }
@@ -28,7 +28,7 @@ struct RemoteAccessView: View {
                 Button("Stop Publishing Reachability") {
                     Task {
                         await loomContext.stopPublishingRemoteReachability()
-                        statusLine = "Stopped publishing relay reachability"
+                        statusLine = "Stopped publishing remote signaling reachability"
                     }
                 }
             }
@@ -54,7 +54,7 @@ struct RemoteAccessView: View {
     private func connect(to peer: LoomPeerSnapshot) async {
         do {
             let connection = try await loomContext.connect(peer)
-            try await connection.send("hello from relay")
+            try await connection.send("hello from remote signaling")
             statusLine = "Connected to \(peer.name)"
         } catch {
             statusLine = error.localizedDescription

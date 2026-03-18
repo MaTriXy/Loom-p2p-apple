@@ -2,7 +2,7 @@
 //  LoomConnectionCoordinator.swift
 //  Loom
 //
-//  Created by Codex on 3/9/26.
+//  Created by Ethan Lipnik on 3/9/26.
 //
 
 import Foundation
@@ -12,7 +12,7 @@ import Network
 public enum LoomConnectionTargetSource: String, Sendable, Codable {
     case localDiscovery
     case overlayDirectory
-    case relay
+    case remoteSignaling
 }
 
 /// Candidate selected by the Loom connection coordinator.
@@ -32,7 +32,7 @@ public struct LoomConnectionTarget: Sendable {
     }
 }
 
-/// Ordered direct-connect plan resolved from discovery and relay presence.
+/// Ordered direct-connect plan resolved from discovery and remote signaling presence.
 public struct LoomConnectionPlan: Sendable {
     public let targets: [LoomConnectionTarget]
 
@@ -41,14 +41,14 @@ public struct LoomConnectionPlan: Sendable {
     }
 }
 
-/// Collects directly reachable candidates to publish through relay presence.
+/// Collects directly reachable candidates to publish through remote signaling presence.
 public enum LoomDirectCandidateCollector {
     public static func collect(
         configuration: LoomNetworkConfiguration,
         listeningPorts: [LoomTransportKind: UInt16] = [:],
         publicHostForTCP: String? = nil
-    ) async -> [LoomRelayCandidate] {
-        var candidates: [LoomRelayCandidate] = []
+    ) async -> [LoomRemoteCandidate] {
+        var candidates: [LoomRemoteCandidate] = []
         let quicPort = listeningPorts[.quic] ?? configuration.quicPort
         let tcpPort = listeningPorts[.tcp] ?? configuration.controlPort
 
@@ -59,7 +59,7 @@ public enum LoomDirectCandidateCollector {
                let address = quicProbe.mappedAddress,
                let mappedPort = quicProbe.mappedPort {
                 candidates.append(
-                    LoomRelayCandidate(
+                    LoomRemoteCandidate(
                         transport: .quic,
                         address: address,
                         port: mappedPort
@@ -72,7 +72,7 @@ public enum LoomDirectCandidateCollector {
            tcpPort > 0,
            let publicHostForTCP {
             candidates.append(
-                LoomRelayCandidate(
+                LoomRemoteCandidate(
                     transport: .tcp,
                     address: publicHostForTCP,
                     port: tcpPort
@@ -88,17 +88,17 @@ public enum LoomDirectCandidateCollector {
 @MainActor
 public final class LoomConnectionCoordinator {
     private let node: LoomNode
-    private let relayClient: LoomRelayClient?
+    private let signalingClient: LoomRemoteSignalingClient?
     private let policy: LoomDirectConnectionPolicy
     private let connector: @Sendable (LoomConnectionTarget, LoomSessionHelloRequest) async throws -> LoomAuthenticatedSession
 
     public init(
         node: LoomNode,
-        relayClient: LoomRelayClient? = nil,
+        signalingClient: LoomRemoteSignalingClient? = nil,
         policy: LoomDirectConnectionPolicy? = nil
     ) {
         self.node = node
-        self.relayClient = relayClient
+        self.signalingClient = signalingClient
         self.policy = policy ?? node.configuration.directConnectionPolicy
         connector = { target, hello in
             try await node.connect(
@@ -111,31 +111,31 @@ public final class LoomConnectionCoordinator {
 
     public init(
         node: LoomNode,
-        relayClient: LoomRelayClient? = nil,
+        signalingClient: LoomRemoteSignalingClient? = nil,
         policy: LoomDirectConnectionPolicy? = nil,
         connector: @escaping @Sendable (LoomConnectionTarget, LoomSessionHelloRequest) async throws -> LoomAuthenticatedSession
     ) {
         self.node = node
-        self.relayClient = relayClient
+        self.signalingClient = signalingClient
         self.policy = policy ?? node.configuration.directConnectionPolicy
         self.connector = connector
     }
 
-    nonisolated package static func relayFallbackSessionID(
-        advertisedRelaySessionID: String?,
+    nonisolated package static func signalingFallbackSessionID(
+        advertisedSignalingSessionID: String?,
         localPeer: LoomPeer?,
         overlayPeer _: LoomPeer?
     ) -> String? {
         guard localPeer == nil else {
             return nil
         }
-        return advertisedRelaySessionID
+        return advertisedSignalingSessionID
     }
 
     public func makePlan(
         localPeer: LoomPeer? = nil,
         overlayPeer: LoomPeer? = nil,
-        relaySessionID: String? = nil
+        signalingSessionID: String? = nil
     ) async throws -> LoomConnectionPlan {
         var targets: [LoomConnectionTarget] = []
 
@@ -159,13 +159,13 @@ public final class LoomConnectionCoordinator {
             )
         }
 
-        if let relaySessionID,
-           let relayClient {
-            let presence = try await relayClient.fetchPresence(sessionID: relaySessionID)
-            let relayTargets = presence.peerCandidates
-                .sorted(by: compareRelayCandidates(_:_:))
+        if let signalingSessionID,
+           let signalingClient {
+            let presence = try await signalingClient.fetchPresence(sessionID: signalingSessionID)
+            let remoteCandidateTargets = presence.peerCandidates
+                .sorted(by: compareRemoteCandidates(_:_:))
                 .compactMap(Self.target(from:))
-            targets.append(contentsOf: relayTargets)
+            targets.append(contentsOf: remoteCandidateTargets)
         }
 
         return LoomConnectionPlan(targets: targets)
@@ -175,12 +175,12 @@ public final class LoomConnectionCoordinator {
         hello: LoomSessionHelloRequest,
         localPeer: LoomPeer? = nil,
         overlayPeer: LoomPeer? = nil,
-        relaySessionID: String? = nil
+        signalingSessionID: String? = nil
     ) async throws -> LoomAuthenticatedSession {
         let plan = try await makePlan(
             localPeer: localPeer,
             overlayPeer: overlayPeer,
-            relaySessionID: relaySessionID
+            signalingSessionID: signalingSessionID
         )
         guard !plan.targets.isEmpty else {
             throw LoomError.sessionNotFound
@@ -208,12 +208,12 @@ public final class LoomConnectionCoordinator {
         try await connector(target, hello)
     }
 
-    private func compareRelayCandidates(
-        _ lhs: LoomRelayCandidate,
-        _ rhs: LoomRelayCandidate
+    private func compareRemoteCandidates(
+        _ lhs: LoomRemoteCandidate,
+        _ rhs: LoomRemoteCandidate
     ) -> Bool {
-        let leftPriority = relayPriority(lhs.transport)
-        let rightPriority = relayPriority(rhs.transport)
+        let leftPriority = remoteCandidatePriority(lhs.transport)
+        let rightPriority = remoteCandidatePriority(rhs.transport)
         if leftPriority != rightPriority {
             return leftPriority < rightPriority
         }
@@ -223,7 +223,7 @@ public final class LoomConnectionCoordinator {
         return lhs.port < rhs.port
     }
 
-    private func relayPriority(_ transport: LoomRelayCandidateTransport) -> Int {
+    private func remoteCandidatePriority(_ transport: LoomRemoteCandidateTransport) -> Int {
         let transportKind: LoomTransportKind = switch transport {
         case .quic: .quic
         case .tcp: .tcp
@@ -231,7 +231,7 @@ public final class LoomConnectionCoordinator {
         return policy.preferredRemoteTransportOrder.firstIndex(of: transportKind) ?? Int.max
     }
 
-    private static func target(from candidate: LoomRelayCandidate) -> LoomConnectionTarget? {
+    private static func target(from candidate: LoomRemoteCandidate) -> LoomConnectionTarget? {
         guard let endpointPort = NWEndpoint.Port(rawValue: candidate.port) else {
             return nil
         }
@@ -241,7 +241,7 @@ public final class LoomConnectionCoordinator {
         case .tcp: .tcp
         }
         return LoomConnectionTarget(
-            source: .relay,
+            source: .remoteSignaling,
             transportKind: transportKind,
             endpoint: .hostPort(host: host, port: endpointPort)
         )
@@ -320,7 +320,7 @@ public final class LoomConnectionCoordinator {
             policy.racesLocalCandidates
         case .overlayDirectory:
             policy.racesRemoteCandidates
-        case .relay:
+        case .remoteSignaling:
             policy.racesRemoteCandidates
         }
     }
@@ -430,7 +430,7 @@ public final class LoomConnectionCoordinator {
             75
         case .overlayDirectory:
             150
-        case .relay:
+        case .remoteSignaling:
             150
         }
         return .milliseconds(staggerMilliseconds * attemptIndex)

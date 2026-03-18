@@ -2,7 +2,7 @@
 //  LoomShellService.swift
 //  LoomShell
 //
-//  Created by Codex on 3/9/26.
+//  Created by Ethan Lipnik on 3/9/26.
 //
 
 import Foundation
@@ -62,16 +62,16 @@ public struct LoomShellServiceStartup: Sendable {
     }
 }
 
-/// Published remote access state for a shell host that is using Loom relay introduction.
+/// Published remote access state for a shell host that is using Loom remote signaling introduction.
 public struct LoomShellRemoteAccessStatus: Sendable, Equatable {
     public let sessionID: String
-    public let peerCandidates: [LoomRelayCandidate]
+    public let peerCandidates: [LoomRemoteCandidate]
     public let heartbeatTTLSeconds: Int
     public let heartbeatInterval: Duration
 
     public init(
         sessionID: String,
-        peerCandidates: [LoomRelayCandidate],
+        peerCandidates: [LoomRemoteCandidate],
         heartbeatTTLSeconds: Int,
         heartbeatInterval: Duration
     ) {
@@ -91,7 +91,7 @@ public final class LoomShellService {
     private var currentConfiguration: LoomShellServiceConfiguration?
     private var currentStartup: LoomShellServiceStartup?
     private var remoteHeartbeatTask: Task<Void, Never>?
-    private var remoteRelayClient: LoomRelayClient?
+    private var remoteSignalingClient: LoomRemoteSignalingClient?
     private var currentRemoteAccess: LoomShellRemoteAccessStatus?
 
     public init(node: LoomNode, host: any LoomShellHost) {
@@ -189,7 +189,7 @@ public final class LoomShellService {
 
     public func startRemoteAccess(
         sessionID: String,
-        relayClient: LoomRelayClient,
+        signalingClient: LoomRemoteSignalingClient,
         publicTCPHost: String? = nil,
         ttlSeconds: Int = 360,
         heartbeatInterval: Duration? = nil
@@ -200,10 +200,10 @@ public final class LoomShellService {
 
         let normalizedSessionID = sessionID.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !normalizedSessionID.isEmpty else {
-            throw LoomShellError.invalidConfiguration("Relay session ID must not be empty.")
+            throw LoomShellError.invalidConfiguration("Remote signaling session ID must not be empty.")
         }
         guard ttlSeconds > 0 else {
-            throw LoomShellError.invalidConfiguration("Relay TTL must be greater than zero.")
+            throw LoomShellError.invalidConfiguration("Remote signaling TTL must be greater than zero.")
         }
 
         await stopRemoteAccess()
@@ -217,7 +217,7 @@ public final class LoomShellService {
             ttlSeconds: ttlSeconds,
             preferred: heartbeatInterval
         )
-        try await relayClient.advertisePeerSession(
+        try await signalingClient.advertisePeerSession(
             sessionID: normalizedSessionID,
             peerID: startup.helloRequest.deviceID,
             acceptingConnections: true,
@@ -233,7 +233,7 @@ public final class LoomShellService {
             heartbeatInterval: resolvedInterval
         )
         currentRemoteAccess = remoteAccess
-        remoteRelayClient = relayClient
+        remoteSignalingClient = signalingClient
         remoteHeartbeatTask = Task { [weak self] in
             await self?.runRemoteHeartbeatLoop()
         }
@@ -243,7 +243,7 @@ public final class LoomShellService {
     public func refreshRemoteAccess(
         publicTCPHost: String? = nil
     ) async throws -> LoomShellRemoteAccessStatus {
-        guard let relayClient = remoteRelayClient,
+        guard let signalingClient = remoteSignalingClient,
               let remoteAccess = currentRemoteAccess,
               let startup = currentStartup else {
             throw LoomError.notAdvertising
@@ -254,7 +254,7 @@ public final class LoomShellService {
             listeningPorts: startup.ports,
             publicHostForTCP: publicTCPHost
         )
-        try await relayClient.peerHeartbeat(
+        try await signalingClient.peerHeartbeat(
             sessionID: remoteAccess.sessionID,
             acceptingConnections: true,
             peerCandidates: candidates,
@@ -276,15 +276,15 @@ public final class LoomShellService {
         remoteHeartbeatTask?.cancel()
         remoteHeartbeatTask = nil
 
-        guard let relayClient = remoteRelayClient,
+        guard let signalingClient = remoteSignalingClient,
               let currentRemoteAccess else {
-            remoteRelayClient = nil
+            remoteSignalingClient = nil
             self.currentRemoteAccess = nil
             return
         }
 
-        try? await relayClient.closePeerSession(sessionID: currentRemoteAccess.sessionID)
-        remoteRelayClient = nil
+        try? await signalingClient.closePeerSession(sessionID: currentRemoteAccess.sessionID)
+        remoteSignalingClient = nil
         self.currentRemoteAccess = nil
     }
 
@@ -344,13 +344,13 @@ public final class LoomShellService {
     }
 
     private func sendRemoteHeartbeat() async {
-        guard let relayClient = remoteRelayClient,
+        guard let signalingClient = remoteSignalingClient,
               let currentRemoteAccess else {
             return
         }
 
         do {
-            try await relayClient.peerHeartbeat(
+            try await signalingClient.peerHeartbeat(
                 sessionID: currentRemoteAccess.sessionID,
                 acceptingConnections: true,
                 peerCandidates: currentRemoteAccess.peerCandidates,

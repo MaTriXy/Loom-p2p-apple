@@ -2,7 +2,7 @@
 //  LoomAppGroupConfiguration.swift
 //  LoomKit
 //
-//  Created by Codex on 3/13/26.
+//  Created by Ethan Lipnik on 3/13/26.
 //
 
 import Foundation

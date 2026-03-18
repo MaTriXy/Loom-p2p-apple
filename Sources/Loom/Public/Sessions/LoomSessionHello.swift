@@ -2,7 +2,7 @@
 //  LoomSessionHello.swift
 //  Loom
 //
-//  Created by Codex on 3/9/26.
+//  Created by Ethan Lipnik on 3/9/26.
 //
 
 import CryptoKit

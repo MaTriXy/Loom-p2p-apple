@@ -6,6 +6,8 @@ Use this guide to get a real Loom integration off the ground. The short version 
 2. drop down to an app-owned `LoomNode` when you need full control of discovery and transport wiring
 3. keep your protocol, approval UX, and product policy above Loom
 
+> Important: Before running your app, make sure your Info.plist includes the required local network keys. See <doc:ConfigureLocalNetworkAccess> for the full setup.
+
 That is the same boundary `MirageKit` uses. Its host and client services both own a ``LoomNode``, but the handshake schema, stream model, CloudKit policy, and UI all live above Loom.
 
 ## Which Product Or Target Should I Start With?

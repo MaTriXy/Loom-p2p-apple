@@ -2,8 +2,8 @@ import LoomCloudKit
 import LoomKit
 import SwiftUI
 
-private func makeRelayConfiguration() -> LoomRelayConfiguration {
-    LoomRelayConfiguration(
+private func makeRemoteSignalingConfiguration() -> LoomRemoteSignalingConfiguration {
+    LoomRemoteSignalingConfiguration(
         baseURL: URL(string: "https://relay.example.com")!,
         appAuthentication: .init(
             appID: "studio-link",
@@ -22,7 +22,7 @@ struct RemoteStudioApp: App {
             cloudKit: .init(
                 containerIdentifier: "iCloud.com.example.studiolink"
             ),
-            relay: makeRelayConfiguration(),
+            remoteSignaling: makeRemoteSignalingConfiguration(),
             trust: .shareAwareAutoTrust
         )
     )

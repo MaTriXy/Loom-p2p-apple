@@ -2,7 +2,7 @@
 //  LoomSnapshots.swift
 //  LoomKit
 //
-//  Created by Codex on 3/10/26.
+//  Created by Ethan Lipnik on 3/10/26.
 //
 
 import Foundation
@@ -34,8 +34,8 @@ public enum LoomPeerSource: String, Codable, CaseIterable, Hashable, Sendable {
     case cloudKitOwn
     /// Peer record visible through an accepted CloudKit share.
     case cloudKitShared
-    /// Relay-backed remote peer currently reachable by session ID.
-    case relay
+    /// Remote signaling-backed remote peer currently reachable by session ID.
+    case remoteSignaling
 }
 
 /// UI-friendly peer snapshot exposed by ``LoomQuery`` and ``LoomContext``.
@@ -54,8 +54,8 @@ public struct LoomPeerSnapshot: Identifiable, Hashable, Sendable {
     public let isShared: Bool
     /// Indicates whether the peer currently publishes relay-backed remote access.
     public let remoteAccessEnabled: Bool
-    /// Relay session identifier published for remote joins, when available.
-    public let relaySessionID: String?
+    /// Remote signaling session identifier published for remote joins, when available.
+    public let signalingSessionID: String?
     /// Decoded Loom advertisement for feature and identity inspection.
     public let advertisement: LoomPeerAdvertisement
     /// Optional bootstrap metadata resolved from CloudKit or local advertisement state.
@@ -78,7 +78,7 @@ public struct LoomPeerSnapshot: Identifiable, Hashable, Sendable {
         LoomPeerCapabilities(
             advertisement: advertisement,
             remoteAccessEnabled: remoteAccessEnabled,
-            relaySessionID: relaySessionID,
+            signalingSessionID: signalingSessionID,
             bootstrapMetadata: bootstrapMetadata
         )
     }
@@ -92,7 +92,7 @@ public struct LoomPeerSnapshot: Identifiable, Hashable, Sendable {
         isNearby: Bool,
         isShared: Bool,
         remoteAccessEnabled: Bool,
-        relaySessionID: String?,
+        signalingSessionID: String?,
         advertisement: LoomPeerAdvertisement,
         bootstrapMetadata: LoomBootstrapMetadata?,
         lastSeen: Date
@@ -104,7 +104,7 @@ public struct LoomPeerSnapshot: Identifiable, Hashable, Sendable {
         self.isNearby = isNearby
         self.isShared = isShared
         self.remoteAccessEnabled = remoteAccessEnabled
-        self.relaySessionID = relaySessionID
+        self.signalingSessionID = signalingSessionID
         self.advertisement = advertisement
         self.bootstrapMetadata = bootstrapMetadata
         self.lastSeen = lastSeen
@@ -119,7 +119,7 @@ public struct LoomPeerSnapshot: Identifiable, Hashable, Sendable {
         isNearby: Bool,
         isShared: Bool,
         remoteAccessEnabled: Bool,
-        relaySessionID: String?,
+        signalingSessionID: String?,
         advertisement: LoomPeerAdvertisement,
         bootstrapMetadata: LoomBootstrapMetadata?,
         lastSeen: Date
@@ -132,7 +132,7 @@ public struct LoomPeerSnapshot: Identifiable, Hashable, Sendable {
             isNearby: isNearby,
             isShared: isShared,
             remoteAccessEnabled: remoteAccessEnabled,
-            relaySessionID: relaySessionID,
+            signalingSessionID: signalingSessionID,
             advertisement: advertisement,
             bootstrapMetadata: bootstrapMetadata,
             lastSeen: lastSeen

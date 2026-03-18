@@ -130,16 +130,16 @@ struct LoomDiagnosticsActionabilityTests {
         #expect(LoomDiagnosticsActionability.shouldCaptureNonFatal(event))
     }
 
-    @Test("Relay auth failures without typed Loom rule are captured")
-    func relayAuthFailuresWithoutTypedLoomRuleAreCaptured() {
+    @Test("Remote signaling auth failures without typed Loom rule are captured")
+    func remoteSignalingAuthFailuresWithoutTypedLoomRuleAreCaptured() {
         let event = makeEvent(
             message: "Remote signaling close failed: http(statusCode: 401, errorCode: Optional(\"app_auth_failed\"), detail: Optional(\"app_signature_verification_failed\"))",
             metadata: LoomDiagnosticsErrorMetadata(
-                typeName: "Loom.LoomRelayError",
-                domain: "Loom.LoomRelayError",
+                typeName: "Loom.LoomRemoteSignalingError",
+                domain: "Loom.LoomRemoteSignalingError",
                 code: 0
             ),
-            category: .relay
+            category: .remoteSignaling
         )
 
         #expect(LoomDiagnosticsActionability.shouldCaptureNonFatal(event))
@@ -150,11 +150,11 @@ struct LoomDiagnosticsActionabilityTests {
         let event = makeEvent(
             message: "Remote signaling configuration is invalid",
             metadata: LoomDiagnosticsErrorMetadata(
-                typeName: "Loom.LoomRelayError",
-                domain: "Loom.LoomRelayError",
+                typeName: "Loom.LoomRemoteSignalingError",
+                domain: "Loom.LoomRemoteSignalingError",
                 code: 1
             ),
-            category: .relay
+            category: .remoteSignaling
         )
 
         #expect(LoomDiagnosticsActionability.shouldCaptureNonFatal(event) == false)

@@ -22,7 +22,7 @@ Loom owns the peer relationship and connectivity infrastructure:
 - discovery over Bonjour and peer-to-peer transports
 - stable device identity and signing
 - trust-policy integration and persistence
-- direct and relay-backed session coordination
+- direct and remote signaling-backed session coordination
 - Wake-on-LAN, SSH, and control-channel bootstrap flows
 - diagnostics and instrumentation for the networking layer
 
@@ -36,6 +36,7 @@ Authenticated Loom sessions also expose transport-facing metadata that higher-le
 
 - <doc:LoomTutorials>
 - <doc:GettingStarted>
+- <doc:ConfigureLocalNetworkAccess>
 - <doc:ModelYourIntegrationBoundary>
 - <doc:DesignYourPeerAdvertisement>
 - <doc:AddTrustAndApproval>
@@ -63,7 +64,7 @@ Authenticated Loom sessions also expose transport-facing metadata that higher-le
 - ``LoomOverlayDirectory``
 - ``LoomOverlayDirectoryConfiguration``
 - ``LoomOverlaySeed``
-- ``LoomRelayClient``
+- ``LoomRemoteSignalingClient``
 - ``LoomSTUNProbe``
 
 ### Bootstrap

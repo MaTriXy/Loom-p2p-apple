@@ -273,6 +273,26 @@ That split is what keeps Loom reusable instead of turning it into someone else's
 - iOS 17.4+
 - visionOS 26+
 
+## Local network setup
+
+Apps using Loom's Bonjour discovery and advertising must declare the required keys in their Info.plist. Without them, the system denies local network access and `NWBrowser` fails with error `-65555 (NoAuth)`.
+
+Add both of these to your app target's Info.plist, replacing the service type with the one you pass to Loom:
+
+```xml
+<key>NSBonjourServices</key>
+<array>
+    <string>_yourapp._tcp</string>
+</array>
+
+<key>NSLocalNetworkUsageDescription</key>
+<string>This app uses the local network to discover and connect to nearby devices.</string>
+```
+
+For App Store distribution, you also need the `com.apple.developer.networking.multicast` entitlement. Request it through your Apple Developer account.
+
+In debug builds, Loom asserts on missing keys at startup so you see a clear message instead of the opaque system error. See the [Configure Local Network Access](https://ethanlipnik.github.io/Loom/documentation/loom/configurelocalnetworkaccess) documentation article for more detail, including how to reset permissions during development.
+
 ## Learn more
 
 If you want the deeper material, go to the docs:

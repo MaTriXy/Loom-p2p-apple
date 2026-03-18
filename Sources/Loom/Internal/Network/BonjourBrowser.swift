@@ -58,6 +58,8 @@ public final class LoomDiscovery {
             return
         }
 
+        validateBonjourInfoPlistKeys(serviceType: serviceType)
+
         LoomLogger.discovery("Starting discovery for \(serviceType)")
 
         let parameters = NWParameters()

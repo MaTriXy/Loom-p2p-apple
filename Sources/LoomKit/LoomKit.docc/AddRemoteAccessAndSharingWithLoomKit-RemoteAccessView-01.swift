@@ -9,7 +9,7 @@ struct RemoteAccessView: View {
         List(remotePeers) { peer in
             VStack(alignment: .leading) {
                 Text(peer.name)
-                Text(peer.relaySessionID ?? "No relay session")
+                Text(peer.signalingSessionID ?? "No signaling session")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }

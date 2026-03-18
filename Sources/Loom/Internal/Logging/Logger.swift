@@ -325,14 +325,14 @@ public extension LoomLogger {
         )
     }
 
-    static func relay(
+    static func remoteSignaling(
         _ message: @autoclosure () -> String,
         fileID: String = #fileID,
         line: UInt = #line,
         function: String = #function
     ) {
         logInfo(
-            .relay,
+            .remoteSignaling,
             message: message,
             fileID: fileID,
             line: line,

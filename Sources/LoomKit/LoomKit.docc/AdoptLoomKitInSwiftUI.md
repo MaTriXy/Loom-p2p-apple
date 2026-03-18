@@ -38,6 +38,8 @@ struct ExampleApp: App {
 
 With `autostart` left at its default value of `true`, LoomKit starts the shared runtime when the scene appears and stops it when the scene goes away.
 
+> Important: Your app's Info.plist must include `NSBonjourServices` (containing your service type, e.g. `_example._tcp`) and `NSLocalNetworkUsageDescription`. Without these keys, discovery fails silently with error `-65555 (NoAuth)`. See the Loom documentation article "Configure Local Network Access" for the full setup and an Info.plist snippet.
+
 On macOS, the same container surface can also opt into an App Group-scoped shared runtime through ``LoomContainerConfiguration/appGroup``. That lets multiple apps keep one network owner while the SwiftUI layer still talks only to `LoomContext`, `LoomQuery`, and `LoomConnectionHandle`.
 
 ## Choose The Right Product

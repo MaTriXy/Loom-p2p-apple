@@ -1,26 +1,26 @@
 //
-//  LoomRelayCandidateTransportTests.swift
+//  LoomRemoteCandidateTransportTests.swift
 //  Loom
 //
-//  Created by Codex on 3/9/26.
+//  Created by Ethan Lipnik on 3/9/26.
 //
 
 @testable import Loom
 import Foundation
 import Testing
 
-@Suite("Loom Relay Candidate Transport")
-struct LoomRelayCandidateTransportTests {
-    @Test("TCP relay candidates round-trip through codable")
+@Suite("Loom Remote Candidate Transport")
+struct LoomRemoteCandidateTransportTests {
+    @Test("TCP remote candidates round-trip through codable")
     func tcpCandidateRoundTrips() throws {
-        let candidate = LoomRelayCandidate(
+        let candidate = LoomRemoteCandidate(
             transport: .tcp,
             address: "203.0.113.10",
             port: 22
         )
 
         let encoded = try JSONEncoder().encode(candidate)
-        let decoded = try JSONDecoder().decode(LoomRelayCandidate.self, from: encoded)
+        let decoded = try JSONDecoder().decode(LoomRemoteCandidate.self, from: encoded)
 
         #expect(decoded == candidate)
     }
@@ -40,7 +40,7 @@ struct LoomRelayCandidateTransportTests {
 
         #expect(
             candidates == [
-                LoomRelayCandidate(
+                LoomRemoteCandidate(
                     transport: .tcp,
                     address: "relay.example.com",
                     port: 2022

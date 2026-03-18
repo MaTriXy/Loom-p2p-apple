@@ -164,7 +164,7 @@ public final class LoomCloudKitShareManager {
         advertisement: LoomPeerAdvertisement,
         identityPublicKey: Data? = nil,
         remoteAccessEnabled: Bool = false,
-        relaySessionID: String? = nil,
+        signalingSessionID: String? = nil,
         bootstrapMetadata: LoomBootstrapMetadata? = nil
     ) async throws {
         guard isCloudKitAvailable() else {
@@ -186,7 +186,7 @@ public final class LoomCloudKitShareManager {
                 advertisement: advertisement,
                 identityPublicKey: identityPublicKey,
                 remoteAccessEnabled: remoteAccessEnabled,
-                relaySessionID: relaySessionID,
+                signalingSessionID: signalingSessionID,
                 bootstrapMetadata: bootstrapMetadata
             )
 
@@ -483,7 +483,7 @@ public final class LoomCloudKitShareManager {
         advertisement: LoomPeerAdvertisement,
         identityPublicKey: Data?,
         remoteAccessEnabled: Bool,
-        relaySessionID: String?,
+        signalingSessionID: String?,
         bootstrapMetadata: LoomBootstrapMetadata?
     ) -> PeerRecordPopulationAttempt {
         record[LoomCloudKitPeerInfo.RecordKey.deviceID.rawValue] = deviceID.uuidString
@@ -502,11 +502,11 @@ public final class LoomCloudKitShareManager {
         if attemptedOptionalPeerMetadataWrite {
             record[LoomCloudKitPeerInfo.RecordKey.identityPublicKey.rawValue] = identityPublicKey
             record[LoomCloudKitPeerInfo.RecordKey.remoteAccessEnabled.rawValue] = remoteAccessEnabled ? 1 : 0
-            record[LoomCloudKitPeerInfo.RecordKey.relaySessionID.rawValue] = relaySessionID
+            record[LoomCloudKitPeerInfo.RecordKey.signalingSessionID.rawValue] = signalingSessionID
         } else {
             record[LoomCloudKitPeerInfo.RecordKey.identityPublicKey.rawValue] = nil
             record[LoomCloudKitPeerInfo.RecordKey.remoteAccessEnabled.rawValue] = nil
-            record[LoomCloudKitPeerInfo.RecordKey.relaySessionID.rawValue] = nil
+            record[LoomCloudKitPeerInfo.RecordKey.signalingSessionID.rawValue] = nil
         }
 
         let attemptedBootstrapMetadataWrite = cloudKitSchemaSupportsBootstrapMetadata && bootstrapMetadata != nil

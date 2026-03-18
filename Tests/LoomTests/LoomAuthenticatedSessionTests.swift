@@ -2,7 +2,7 @@
 //  LoomAuthenticatedSessionTests.swift
 //  Loom
 //
-//  Created by Codex on 3/10/26.
+//  Created by Ethan Lipnik on 3/10/26.
 //
 
 @testable import Loom

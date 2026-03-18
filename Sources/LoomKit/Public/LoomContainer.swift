@@ -2,7 +2,7 @@
 //  LoomContainer.swift
 //  LoomKit
 //
-//  Created by Codex on 3/10/26.
+//  Created by Ethan Lipnik on 3/10/26.
 //
 
 import Foundation
@@ -37,7 +37,7 @@ public final class LoomContainer {
             deviceIDSuiteName: configuration.deviceIDSuiteName,
             cloudKit: configuration.cloudKit,
             overlayDirectory: configuration.overlayDirectory,
-            relay: configuration.relay,
+            remoteSignaling: configuration.remoteSignaling,
             appGroup: configuration.appGroup,
             trust: configuration.trust,
             enablePeerToPeer: configuration.enablePeerToPeer,
@@ -63,7 +63,7 @@ public final class LoomContainer {
             configuration: networkConfiguration,
             identityManager: LoomIdentityManager.shared
         )
-        let relayClient = configuration.relay.map { LoomRelayClient(configuration: $0) }
+        let signalingClient = configuration.remoteSignaling.map { LoomRemoteSignalingClient(configuration: $0) }
         let cloudKitConfiguration = configuration.cloudKit.map {
             Self.resolvedCloudKitConfiguration(
                 $0,
@@ -86,7 +86,7 @@ public final class LoomContainer {
 
         let connectionCoordinator = LoomConnectionCoordinator(
             node: node,
-            relayClient: relayClient,
+            signalingClient: signalingClient,
             policy: configuration.directConnectionPolicy
         )
         let bootstrapMetadataProvider = self.configuration.bootstrapMetadataProvider
@@ -116,7 +116,7 @@ public final class LoomContainer {
                         cloudKitManager: cloudKitManager,
                         peerProvider: peerProvider,
                         shareManager: shareManager,
-                        relayClient: relayClient,
+                        signalingClient: signalingClient,
                         overlayDirectoryConfiguration: overlayDirectoryConfiguration,
                         connectionCoordinator: connectionCoordinator,
                         bootstrapMetadataProvider: bootstrapMetadataProvider,
@@ -139,7 +139,7 @@ public final class LoomContainer {
             cloudKitManager: cloudKitManager,
             peerProvider: peerProvider,
             shareManager: shareManager,
-            relayClient: relayClient,
+            signalingClient: signalingClient,
             connectionCoordinator: connectionCoordinator,
             hostClient: hostClient
         )

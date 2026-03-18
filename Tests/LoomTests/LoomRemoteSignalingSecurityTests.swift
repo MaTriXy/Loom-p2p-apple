@@ -15,12 +15,12 @@ import Testing
 struct LoomRemoteSignalingSecurityTests {
     @Test("Remote signaling auth HTTP failures are marked permanent")
     func remoteSignalingAuthHTTPFailuresArePermanent() {
-        let unauthorized = LoomRelayError.http(
+        let unauthorized = LoomRemoteSignalingError.http(
             statusCode: 401,
             errorCode: "auth_failed",
             detail: "signature_verification_failed"
         )
-        let forbidden = LoomRelayError.http(
+        let forbidden = LoomRemoteSignalingError.http(
             statusCode: 403,
             errorCode: "auth_failed",
             detail: nil
@@ -34,7 +34,7 @@ struct LoomRemoteSignalingSecurityTests {
 
     @Test("Remote signaling non-auth HTTP failures are not marked permanent")
     func remoteSignalingNonAuthHTTPFailuresAreNotPermanent() {
-        let rateLimited = LoomRelayError.http(
+        let rateLimited = LoomRemoteSignalingError.http(
             statusCode: 429,
             errorCode: "rate_limited",
             detail: nil
@@ -46,7 +46,7 @@ struct LoomRemoteSignalingSecurityTests {
 
     @Test("Invalid signaling configuration is permanent")
     func invalidSignalingConfigurationIsPermanent() {
-        let error = LoomRelayError.invalidConfiguration
+        let error = LoomRemoteSignalingError.invalidConfiguration
         #expect(error.isAuthenticationFailure == false)
         #expect(error.isPermanentConfigurationFailure)
     }
@@ -54,19 +54,19 @@ struct LoomRemoteSignalingSecurityTests {
     @MainActor
     @Test("Remote signaling rejects non-HTTPS base URL")
     func remoteSignalingRejectsNonHTTPSBaseURL() async {
-        let configuration = LoomRelayConfiguration(
+        let configuration = LoomRemoteSignalingConfiguration(
             baseURL: URL(string: "http://example.com")!,
-            appAuthentication: LoomRelayAppAuthentication(
+            appAuthentication: LoomRemoteSignalingAppAuthentication(
                 appID: "test-app",
                 sharedSecret: "test-secret"
             )
         )
-        let client = LoomRelayClient(configuration: configuration)
+        let client = LoomRemoteSignalingClient(configuration: configuration)
 
         do {
             try await client.joinSession(sessionID: "session-1")
             Issue.record("Expected invalidConfiguration for non-HTTPS signaling URL.")
-        } catch let error as LoomRelayError {
+        } catch let error as LoomRemoteSignalingError {
             switch error {
             case .invalidConfiguration:
                 break
@@ -74,7 +74,7 @@ struct LoomRemoteSignalingSecurityTests {
                 Issue.record("Expected invalidConfiguration, got \(error.localizedDescription).")
             }
         } catch {
-            Issue.record("Expected LoomRelayError, got \(error.localizedDescription).")
+            Issue.record("Expected LoomRemoteSignalingError, got \(error.localizedDescription).")
         }
     }
 }

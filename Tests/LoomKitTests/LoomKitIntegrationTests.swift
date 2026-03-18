@@ -2,7 +2,7 @@
 //  LoomKitIntegrationTests.swift
 //  Loom
 //
-//  Created by Codex on 3/10/26.
+//  Created by Ethan Lipnik on 3/10/26.
 //
 
 @testable import Loom
@@ -379,11 +379,11 @@ struct LoomKitIntegrationTests {
             id: UUID(),
             name: "Studio iPad",
             deviceType: .iPad,
-            sources: [.nearby, .relay],
+            sources: [.nearby, .remoteSignaling],
             isNearby: true,
             isShared: false,
             remoteAccessEnabled: true,
-            relaySessionID: "studio-ipad",
+            signalingSessionID: "studio-ipad",
             advertisement: LoomPeerAdvertisement(
                 deviceType: .iPad,
                 directTransports: [
@@ -398,7 +398,7 @@ struct LoomKitIntegrationTests {
         )
 
         #expect(peer.capabilities.connectivity.supportsNearbyDirectConnections)
-        #expect(peer.capabilities.connectivity.supportsRelayReachability)
+        #expect(peer.capabilities.connectivity.supportsRemoteSignalingReachability)
         #expect(peer.capabilities.bootstrap.supportsWakeOnLAN)
         #expect(peer.capabilities.bootstrap.supportsSSHUnlock)
         #expect(peer.capabilities.bootstrap.supportsPreloginControl)
@@ -418,7 +418,7 @@ struct LoomKitIntegrationTests {
             isNearby: true,
             isShared: false,
             remoteAccessEnabled: false,
-            relaySessionID: nil,
+            signalingSessionID: nil,
             advertisement: LoomPeerAdvertisement(
                 deviceID: UUID(),
                 deviceType: .iPhone
@@ -449,7 +449,7 @@ struct LoomKitIntegrationTests {
                 isNearby: true,
                 isShared: false,
                 remoteAccessEnabled: false,
-                relaySessionID: nil,
+                signalingSessionID: nil,
                 advertisement: LoomPeerAdvertisement(
                     deviceID: peerID,
                     deviceType: peerDeviceType

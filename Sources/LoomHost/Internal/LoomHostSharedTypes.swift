@@ -2,7 +2,7 @@
 //  LoomHostSharedTypes.swift
 //  LoomHost
 //
-//  Created by Codex on 3/10/26.
+//  Created by Ethan Lipnik on 3/10/26.
 //
 
 import Foundation
@@ -13,7 +13,7 @@ package enum LoomHostPeerSource: String, Codable, Sendable {
     case overlay
     case cloudKitOwn
     case cloudKitShared
-    case relay
+    case remoteSignaling
 }
 
 package struct LoomHostPeerRecord: Codable, Hashable, Sendable, Identifiable {
@@ -24,7 +24,7 @@ package struct LoomHostPeerRecord: Codable, Hashable, Sendable, Identifiable {
     package let isNearby: Bool
     package let isShared: Bool
     package let remoteAccessEnabled: Bool
-    package let relaySessionID: String?
+    package let signalingSessionID: String?
     package let advertisement: LoomPeerAdvertisement
     package let bootstrapMetadata: LoomBootstrapMetadata?
     package let lastSeen: Date

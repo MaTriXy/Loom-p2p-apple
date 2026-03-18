@@ -2,7 +2,7 @@
 //  LoomCloudKitShareManagerTests.swift
 //  Loom
 //
-//  Created by Codex on 3/11/26.
+//  Created by Ethan Lipnik on 3/11/26.
 //
 
 import CloudKit
@@ -98,7 +98,7 @@ struct LoomCloudKitShareManagerTests {
             advertisement: makeAdvertisement(deviceID: deviceID, identityKeyID: "identity-key"),
             identityPublicKey: identityPublicKey,
             remoteAccessEnabled: true,
-            relaySessionID: "relay-session",
+            signalingSessionID: "relay-session",
             bootstrapMetadata: makeBootstrapMetadata()
         )
 

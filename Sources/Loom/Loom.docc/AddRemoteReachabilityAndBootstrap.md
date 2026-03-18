@@ -25,7 +25,7 @@ guard stunResult.reachable,
     return
 }
 
-let candidate = LoomRelayCandidate(
+let candidate = LoomRemoteCandidate(
     transport: .quic,
     address: address,
     port: port
@@ -36,7 +36,7 @@ That gives your app concrete information about whether direct remote connectivit
 
 ## Add an overlay peer directory when you already have host seeds
 
-Some products run on overlay or VPN-style networks where devices already have stable names or IP addresses. In that case, use ``LoomOverlayDirectory`` with an app-owned seed provider instead of treating those peers as relay-only.
+Some products run on overlay or VPN-style networks where devices already have stable names or IP addresses. In that case, use ``LoomOverlayDirectory`` with an app-owned seed provider instead of treating those peers as remote signaling-only.
 
 ```swift
 let overlayDirectory = LoomOverlayDirectory(
@@ -62,18 +62,18 @@ Each seed is just a host hint. Loom then probes that host’s dedicated overlay 
 - Loom owns Loom-native peer identity and transport metadata
 - your app still decides which seeds to trust and when to refresh them
 
-The important architectural boundary is that overlay discovery is still direct connectivity. It is not CloudKit presence and it is not relay signaling.
+The important architectural boundary is that overlay discovery is still direct connectivity. It is not CloudKit presence and it is not remote signaling.
 
 If your overlay is Tailscale, that usually means your seed provider returns MagicDNS host names or stable tailnet IP addresses. Loom does not integrate with the Tailscale control plane directly. It only probes the hosts your app chooses to trust and publish. For a more concrete Tailscale and custom-inventory walkthrough, see <doc:UseTailscaleAndCustomOverlays>.
 
 ## Publish remote presence
 
-Use ``LoomRelayClient`` with app-owned signaling credentials.
+Use ``LoomRemoteSignalingClient`` with app-owned signaling credentials.
 
 ```swift
-let relayClient = LoomRelayClient(configuration: relayConfiguration)
+let signalingClient = LoomRemoteSignalingClient(configuration: signalingConfiguration)
 
-try await relayClient.advertisePeerSession(
+try await signalingClient.advertisePeerSession(
     sessionID: sessionID,
     peerID: deviceID,
     acceptingConnections: true,

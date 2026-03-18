@@ -2,7 +2,7 @@
 //  LoomStoreOverlayTests.swift
 //  LoomKit
 //
-//  Created by Codex on 3/11/26.
+//  Created by Ethan Lipnik on 3/11/26.
 //
 
 @testable import Loom
@@ -71,7 +71,7 @@ struct LoomStoreOverlayTests {
             cloudKitManager: nil,
             peerProvider: nil,
             shareManager: nil,
-            relayClient: nil,
+            signalingClient: nil,
             connectionCoordinator: LoomConnectionCoordinator(node: node)
         )
         let snapshots = await store.makeSnapshotStream()

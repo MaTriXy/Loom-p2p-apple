@@ -34,6 +34,8 @@ actor BonjourAdvertiser {
     func start(port: UInt16 = 0, onConnection: @escaping @Sendable (NWConnection) -> Void) async throws -> UInt16 {
         guard !isAdvertising else { throw LoomError.alreadyAdvertising }
 
+        validateBonjourInfoPlistKeys(serviceType: serviceType)
+
         let parameters = NWParameters.tcp
         parameters.serviceClass = .interactiveVideo
         parameters.includePeerToPeer = enablePeerToPeer

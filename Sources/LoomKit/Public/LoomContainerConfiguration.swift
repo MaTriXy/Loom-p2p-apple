@@ -2,7 +2,7 @@
 //  LoomContainerConfiguration.swift
 //  LoomKit
 //
-//  Created by Codex on 3/10/26.
+//  Created by Ethan Lipnik on 3/10/26.
 //
 
 import Foundation
@@ -34,8 +34,8 @@ public struct LoomContainerConfiguration: Sendable {
     public let cloudKit: LoomCloudKitConfiguration?
     /// Optional overlay directory configuration used for off-LAN peer discovery.
     public let overlayDirectory: LoomOverlayDirectoryConfiguration?
-    /// Optional relay configuration used for remote reachability publication and remote joins.
-    public let relay: LoomRelayConfiguration?
+    /// Optional remote signaling configuration used for remote reachability publication and remote joins.
+    public let remoteSignaling: LoomRemoteSignalingConfiguration?
     /// Optional macOS App Group configuration used to share one Loom runtime across multiple apps.
     public let appGroup: LoomAppGroupConfiguration?
     /// Trust policy applied when evaluating nearby and CloudKit-backed peers.
@@ -48,7 +48,7 @@ public struct LoomContainerConfiguration: Sendable {
     public let supportedFeatures: [String]
     /// App-defined provider for optional bootstrap metadata.
     public let bootstrapMetadataProvider: BootstrapMetadataProvider?
-    /// Optional relay session ID to publish immediately after start.
+    /// Optional remote signaling session ID to publish immediately after start.
     public let remoteSessionID: String?
     /// Transfer-engine tuning used for outgoing and incoming bulk transfers.
     public let transferConfiguration: LoomTransferConfiguration
@@ -62,7 +62,7 @@ public struct LoomContainerConfiguration: Sendable {
         deviceIDSuiteName: String? = nil,
         cloudKit: LoomCloudKitConfiguration? = nil,
         overlayDirectory: LoomOverlayDirectoryConfiguration? = nil,
-        relay: LoomRelayConfiguration? = nil,
+        remoteSignaling: LoomRemoteSignalingConfiguration? = nil,
         appGroup: LoomAppGroupConfiguration? = nil,
         trust: LoomTrustMode = .manualOnly,
         enablePeerToPeer: Bool = true,
@@ -78,7 +78,7 @@ public struct LoomContainerConfiguration: Sendable {
         self.deviceIDSuiteName = deviceIDSuiteName
         self.cloudKit = cloudKit
         self.overlayDirectory = overlayDirectory
-        self.relay = relay
+        self.remoteSignaling = remoteSignaling
         self.appGroup = appGroup
         self.trust = trust
         self.enablePeerToPeer = enablePeerToPeer

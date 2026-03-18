@@ -22,7 +22,7 @@ public struct LoomCloudKitPeerInfo: Identifiable, Hashable, Sendable {
     public let recordID: String
     public let identityPublicKey: Data?
     public let remoteAccessEnabled: Bool
-    public let relaySessionID: String?
+    public let signalingSessionID: String?
     public let bootstrapMetadata: LoomBootstrapMetadata?
 
     /// Typed capability view derived from the peer's current publication state.
@@ -30,7 +30,7 @@ public struct LoomCloudKitPeerInfo: Identifiable, Hashable, Sendable {
         LoomPeerCapabilities(
             advertisement: advertisement,
             remoteAccessEnabled: remoteAccessEnabled,
-            relaySessionID: relaySessionID,
+            signalingSessionID: signalingSessionID,
             bootstrapMetadata: bootstrapMetadata
         )
     }
@@ -54,7 +54,7 @@ public struct LoomCloudKitPeerInfo: Identifiable, Hashable, Sendable {
         recordID: String,
         identityPublicKey: Data? = nil,
         remoteAccessEnabled: Bool = false,
-        relaySessionID: String? = nil,
+        signalingSessionID: String? = nil,
         bootstrapMetadata: LoomBootstrapMetadata? = nil
     ) {
         self.id = id
@@ -67,7 +67,7 @@ public struct LoomCloudKitPeerInfo: Identifiable, Hashable, Sendable {
         self.recordID = recordID
         self.identityPublicKey = identityPublicKey
         self.remoteAccessEnabled = remoteAccessEnabled
-        self.relaySessionID = relaySessionID
+        self.signalingSessionID = signalingSessionID
         self.bootstrapMetadata = bootstrapMetadata
     }
 
@@ -83,7 +83,7 @@ public struct LoomCloudKitPeerInfo: Identifiable, Hashable, Sendable {
         recordID: String,
         identityPublicKey: Data? = nil,
         remoteAccessEnabled: Bool = false,
-        relaySessionID: String? = nil,
+        signalingSessionID: String? = nil,
         bootstrapMetadata: LoomBootstrapMetadata? = nil
     ) {
         self.init(
@@ -97,7 +97,7 @@ public struct LoomCloudKitPeerInfo: Identifiable, Hashable, Sendable {
             recordID: recordID,
             identityPublicKey: identityPublicKey,
             remoteAccessEnabled: remoteAccessEnabled,
-            relaySessionID: relaySessionID,
+            signalingSessionID: signalingSessionID,
             bootstrapMetadata: bootstrapMetadata
         )
     }
@@ -121,7 +121,7 @@ public extension LoomCloudKitPeerInfo {
         case advertisementBlob
         case identityPublicKey
         case remoteAccessEnabled
-        case relaySessionID
+        case signalingSessionID = "relaySessionID"
         case bootstrapMetadataBlob
         case lastSeen
         case createdAt

@@ -26,8 +26,8 @@ struct RemoteAccessView: View {
 
                 Text(
                     loomContext.isPublishingRemoteReachability
-                        ? "Publishing relay reachability"
-                        : "Relay reachability not published"
+                        ? "Publishing remote signaling reachability"
+                        : "Remote signaling reachability not published"
                 )
                     .foregroundStyle(.secondary)
             }

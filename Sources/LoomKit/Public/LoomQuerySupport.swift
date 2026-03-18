@@ -2,7 +2,7 @@
 //  LoomQuerySupport.swift
 //  LoomKit
 //
-//  Created by Codex on 3/11/26.
+//  Created by Ethan Lipnik on 3/11/26.
 //
 
 import Foundation

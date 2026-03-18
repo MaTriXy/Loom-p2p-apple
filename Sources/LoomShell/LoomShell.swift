@@ -2,7 +2,7 @@
 //  LoomShell.swift
 //  LoomShell
 //
-//  Created by Codex on 3/9/26.
+//  Created by Ethan Lipnik on 3/9/26.
 //
 
 @_exported import Foundation
@@ -329,16 +329,16 @@ public final class LoomShellConnector {
     private weak var node: LoomNode?
     private let connectionCoordinator: LoomConnectionCoordinator
 
-    public init(node: LoomNode, relayClient: LoomRelayClient? = nil) {
+    public init(node: LoomNode, signalingClient: LoomRemoteSignalingClient? = nil) {
         self.node = node
-        connectionCoordinator = LoomConnectionCoordinator(node: node, relayClient: relayClient)
+        connectionCoordinator = LoomConnectionCoordinator(node: node, signalingClient: signalingClient)
     }
 
     public func connect(
         hello: LoomSessionHelloRequest,
         request: LoomShellSessionRequest,
         localPeer: LoomPeer? = nil,
-        relaySessionID: String? = nil,
+        signalingSessionID: String? = nil,
         peerCapabilities: LoomShellPeerCapabilities? = nil,
         bootstrapMetadata: LoomBootstrapMetadata? = nil,
         sshAuthentication: LoomShellSSHAuthentication? = nil,
@@ -359,7 +359,7 @@ public final class LoomShellConnector {
             hello: hello,
             request: request,
             localPeer: localPeer,
-            relaySessionID: relaySessionID,
+            signalingSessionID: signalingSessionID,
             peerCapabilities: peerCapabilities,
             bootstrapMetadata: bootstrapMetadata,
             sshAuthentication: sshAuthentication,
@@ -373,7 +373,7 @@ public final class LoomShellConnector {
         to peer: LoomShellDiscoveredPeer,
         identity: LoomShellIdentity,
         request: LoomShellSessionRequest,
-        relaySessionID: String? = nil,
+        signalingSessionID: String? = nil,
         sshAuthentication: LoomShellSSHAuthentication? = nil,
         preferLoomNative: Bool = true,
         allowEmergencySSH: Bool = false,
@@ -386,7 +386,7 @@ public final class LoomShellConnector {
             hello: hello,
             request: request,
             localPeer: peer.peer,
-            relaySessionID: relaySessionID,
+            signalingSessionID: signalingSessionID,
             peerCapabilities: peer.capabilities,
             bootstrapMetadata: peer.bootstrapMetadata,
             sshAuthentication: sshAuthentication,
@@ -403,7 +403,7 @@ public final class LoomShellConnector {
         hello: LoomSessionHelloRequest,
         request: LoomShellSessionRequest,
         localPeer: LoomPeer?,
-        relaySessionID: String?,
+        signalingSessionID: String?,
         peerCapabilities: LoomShellPeerCapabilities?,
         bootstrapMetadata: LoomBootstrapMetadata?,
         sshAuthentication: LoomShellSSHAuthentication?,
@@ -430,7 +430,7 @@ public final class LoomShellConnector {
 
                     let nativePlan = try await connectionCoordinator.makePlan(
                         localPeer: localPeer,
-                        relaySessionID: relaySessionID
+                        signalingSessionID: signalingSessionID
                     )
                     if nativePlan.targets.isEmpty {
                         attempts.append(

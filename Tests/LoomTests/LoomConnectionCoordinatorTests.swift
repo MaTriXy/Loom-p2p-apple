@@ -2,7 +2,7 @@
 //  LoomConnectionCoordinatorTests.swift
 //  Loom
 //
-//  Created by Codex on 3/10/26.
+//  Created by Ethan Lipnik on 3/10/26.
 //
 
 @testable import Loom
@@ -12,7 +12,7 @@ import Testing
 @Suite("Loom Connection Coordinator", .serialized)
 struct LoomConnectionCoordinatorTests {
     @MainActor
-    @Test("Local discovery plans advertised direct transports before falling back to relay")
+    @Test("Local discovery plans advertised direct transports before falling back to remote signaling")
     func localPlanUsesAdvertisedTransports() async throws {
         let node = LoomNode(
             configuration: LoomNetworkConfiguration(
@@ -184,8 +184,8 @@ struct LoomConnectionCoordinatorTests {
     }
 
     @MainActor
-    @Test("Connection plans order nearby targets before overlay and relay targets")
-    func connectionPlanOrdersNearbyThenOverlayThenRelay() async throws {
+    @Test("Connection plans order nearby targets before overlay and remote signaling targets")
+    func connectionPlanOrdersNearbyThenOverlayThenRemoteSignaling() async throws {
         let node = LoomNode(
             configuration: LoomNetworkConfiguration(
                 enablePeerToPeer: false,
@@ -196,7 +196,7 @@ struct LoomConnectionCoordinatorTests {
                 )
             )
         )
-        let (relayClient, _, _) = makeCoordinatorRelayClient(
+        let (signalingClient, _, _) = makeCoordinatorSignalingClient(
             responses: [
                 .json(
                     statusCode: 200,
@@ -212,7 +212,7 @@ struct LoomConnectionCoordinatorTests {
         )
         let coordinator = LoomConnectionCoordinator(
             node: node,
-            relayClient: relayClient
+            signalingClient: signalingClient
         )
 
         let plan = try await coordinator.makePlan(
@@ -223,7 +223,7 @@ struct LoomConnectionCoordinatorTests {
                 tcpPort: 4600,
                 quicPort: 5600
             ),
-            relaySessionID: "relay-session"
+            signalingSessionID: "relay-session"
         )
 
         #expect(plan.targets.map(\.source) == [
@@ -231,13 +231,13 @@ struct LoomConnectionCoordinatorTests {
             .localDiscovery,
             .overlayDirectory,
             .overlayDirectory,
-            .relay,
+            .remoteSignaling,
         ])
     }
 
     @MainActor
-    @Test("Relay fallback remains available when only overlay discovery succeeded")
-    func relayFallbackIgnoresOverlayPresence() {
+    @Test("Remote signaling fallback remains available when only overlay discovery succeeded")
+    func signalingFallbackIgnoresOverlayPresence() {
         let overlayPeer = makeCoordinatorTestPeer(
             name: "Overlay Host",
             endpointHost: "overlay.internal",
@@ -246,15 +246,15 @@ struct LoomConnectionCoordinatorTests {
         )
 
         #expect(
-            LoomConnectionCoordinator.relayFallbackSessionID(
-                advertisedRelaySessionID: "relay-session",
+            LoomConnectionCoordinator.signalingFallbackSessionID(
+                advertisedSignalingSessionID: "relay-session",
                 localPeer: nil,
                 overlayPeer: overlayPeer
             ) == "relay-session"
         )
         #expect(
-            LoomConnectionCoordinator.relayFallbackSessionID(
-                advertisedRelaySessionID: "relay-session",
+            LoomConnectionCoordinator.signalingFallbackSessionID(
+                advertisedSignalingSessionID: "relay-session",
                 localPeer: makeCoordinatorTestPeer(),
                 overlayPeer: overlayPeer
             ) == nil
@@ -262,9 +262,9 @@ struct LoomConnectionCoordinatorTests {
     }
 
     @MainActor
-    @Test("Overlay connections succeed before relay candidates are attempted")
-    func overlayConnectionsSkipRelayAttemptsOnSuccess() async throws {
-        let (relayClient, requestedPaths, _) = makeCoordinatorRelayClient(
+    @Test("Overlay connections succeed before remote signaling candidates are attempted")
+    func overlayConnectionsSkipRemoteSignalingAttemptsOnSuccess() async throws {
+        let (signalingClient, requestedPaths, _) = makeCoordinatorSignalingClient(
             responses: [
                 .json(
                     statusCode: 200,
@@ -296,7 +296,7 @@ struct LoomConnectionCoordinatorTests {
                         )
                     )
                 ),
-                relayClient: relayClient,
+                signalingClient: signalingClient,
                 connector: { target, _ in
                     await attemptRecorder.record(target.transportKind, source: target.source)
                     return makeCoordinatorTestSession(transportKind: target.transportKind)
@@ -311,7 +311,7 @@ struct LoomConnectionCoordinatorTests {
                     tcpPort: 4700,
                     quicPort: nil
                 ),
-                relaySessionID: "relay-session"
+                signalingSessionID: "relay-session"
             )
 
             #expect(await session.transportKind == .tcp)
@@ -437,23 +437,23 @@ private actor ConnectionCoordinatorInstrumentationSink: LoomInstrumentationSink 
     }
 }
 
-private struct CoordinatorRelayMockResponse {
+private struct CoordinatorSignalingMockResponse {
     let statusCode: Int
     let bodyData: Data
 
-    static func json(statusCode: Int, body: [String: Any]) -> CoordinatorRelayMockResponse {
+    static func json(statusCode: Int, body: [String: Any]) -> CoordinatorSignalingMockResponse {
         let bodyData = (try? JSONSerialization.data(withJSONObject: body)) ?? Data("{}".utf8)
-        return CoordinatorRelayMockResponse(statusCode: statusCode, bodyData: bodyData)
+        return CoordinatorSignalingMockResponse(statusCode: statusCode, bodyData: bodyData)
     }
 }
 
-private final class CoordinatorRelayMockState: @unchecked Sendable {
+private final class CoordinatorSignalingMockState: @unchecked Sendable {
     private let lock = NSLock()
-    private var queuedResponses: [CoordinatorRelayMockResponse] = []
+    private var queuedResponses: [CoordinatorSignalingMockResponse] = []
     private var paths: [String] = []
     private var bodies: [[String: Any]] = []
 
-    func configure(responses: [CoordinatorRelayMockResponse]) {
+    func configure(responses: [CoordinatorSignalingMockResponse]) {
         lock.lock()
         defer { lock.unlock() }
         queuedResponses = responses
@@ -461,7 +461,7 @@ private final class CoordinatorRelayMockState: @unchecked Sendable {
         bodies.removeAll(keepingCapacity: true)
     }
 
-    func dequeue(path: String, body: [String: Any]?) -> CoordinatorRelayMockResponse? {
+    func dequeue(path: String, body: [String: Any]?) -> CoordinatorSignalingMockResponse? {
         lock.lock()
         defer { lock.unlock() }
         paths.append(path)
@@ -481,10 +481,10 @@ private final class CoordinatorRelayMockState: @unchecked Sendable {
     }
 }
 
-private final class CoordinatorRelayMockURLProtocol: URLProtocol {
-    private static let state = CoordinatorRelayMockState()
+private final class CoordinatorSignalingMockURLProtocol: URLProtocol {
+    private static let state = CoordinatorSignalingMockState()
 
-    static func configure(_ responses: [CoordinatorRelayMockResponse]) {
+    static func configure(_ responses: [CoordinatorSignalingMockResponse]) {
         state.configure(responses: responses)
     }
 
@@ -564,24 +564,24 @@ private final class CoordinatorRelayMockURLProtocol: URLProtocol {
 }
 
 @MainActor
-private func makeCoordinatorRelayClient(
-    responses: [CoordinatorRelayMockResponse]
-) -> (LoomRelayClient, @Sendable () -> [String], URLSession) {
-    CoordinatorRelayMockURLProtocol.configure(responses)
+private func makeCoordinatorSignalingClient(
+    responses: [CoordinatorSignalingMockResponse]
+) -> (LoomRemoteSignalingClient, @Sendable () -> [String], URLSession) {
+    CoordinatorSignalingMockURLProtocol.configure(responses)
     let sessionConfiguration = URLSessionConfiguration.ephemeral
-    sessionConfiguration.protocolClasses = [CoordinatorRelayMockURLProtocol.self]
+    sessionConfiguration.protocolClasses = [CoordinatorSignalingMockURLProtocol.self]
     let urlSession = URLSession(configuration: sessionConfiguration)
-    let client = LoomRelayClient(
-        configuration: LoomRelayConfiguration(
-            baseURL: URL(string: "https://loom-coordinator-relay.test")!,
+    let client = LoomRemoteSignalingClient(
+        configuration: LoomRemoteSignalingConfiguration(
+            baseURL: URL(string: "https://loom-coordinator-signaling.test")!,
             requestTimeout: 5,
-            appAuthentication: LoomRelayAppAuthentication(
+            appAuthentication: LoomRemoteSignalingAppAuthentication(
                 appID: "test-app-id",
                 sharedSecret: "test-app-secret"
             )
         ),
         identityManager: LoomIdentityManager(
-            service: "com.ethanlipnik.loom.tests.coordinator-relay.\(UUID().uuidString)",
+            service: "com.ethanlipnik.loom.tests.coordinator-signaling.\(UUID().uuidString)",
             account: "p256-signing",
             synchronizable: false
         ),
@@ -589,7 +589,7 @@ private func makeCoordinatorRelayClient(
     )
     return (
         client,
-        { CoordinatorRelayMockURLProtocol.requestedPaths() },
+        { CoordinatorSignalingMockURLProtocol.requestedPaths() },
         urlSession
     )
 }

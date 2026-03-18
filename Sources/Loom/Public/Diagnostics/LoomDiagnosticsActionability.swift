@@ -46,8 +46,8 @@ public enum LoomDiagnosticsActionability {
             return userDependentNWErrorCodes.contains(code)
         }
 
-        if domain == "Loom.LoomRelayError" {
-            return userDependentRelayErrorCodes.contains(code)
+        if domain == "Loom.LoomRemoteSignalingError" {
+            return userDependentRemoteSignalingErrorCodes.contains(code)
         }
 
         if domain == "CKErrorDomain" {
@@ -105,7 +105,7 @@ public enum LoomDiagnosticsActionability {
         89, // ECANCELED
     ]
 
-    private static let userDependentRelayErrorCodes: Set<Int> = [
+    private static let userDependentRemoteSignalingErrorCodes: Set<Int> = [
         1, // invalidConfiguration
     ]
 

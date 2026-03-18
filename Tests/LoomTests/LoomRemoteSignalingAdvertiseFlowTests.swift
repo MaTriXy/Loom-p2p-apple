@@ -130,7 +130,7 @@ struct LoomRemoteSignalingAdvertiseFlowTests {
     @MainActor
     private func makeClient(
         responses: [LoomRemoteSignalingMockResponse]
-    ) -> (LoomRelayClient, @Sendable () -> [String], @Sendable () -> [[String: Any]]) {
+    ) -> (LoomRemoteSignalingClient, @Sendable () -> [String], @Sendable () -> [[String: Any]]) {
         LoomRemoteSignalingMockURLProtocol.configure(responses)
         let sessionConfiguration = URLSessionConfiguration.ephemeral
         sessionConfiguration.protocolClasses = [LoomRemoteSignalingMockURLProtocol.self]
@@ -140,15 +140,15 @@ struct LoomRemoteSignalingAdvertiseFlowTests {
             account: "p256-signing",
             synchronizable: false
         )
-        let configuration = LoomRelayConfiguration(
+        let configuration = LoomRemoteSignalingConfiguration(
             baseURL: URL(string: "https://loom-remote-signaling.test")!,
             requestTimeout: 5,
-            appAuthentication: LoomRelayAppAuthentication(
+            appAuthentication: LoomRemoteSignalingAppAuthentication(
                 appID: "test-app-id",
                 sharedSecret: "test-app-secret"
             )
         )
-        let client = LoomRelayClient(
+        let client = LoomRemoteSignalingClient(
             configuration: configuration,
             identityManager: identityManager,
             urlSession: urlSession
