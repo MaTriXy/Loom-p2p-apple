@@ -47,12 +47,12 @@ public enum LoomHolePunch {
 
         await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
             connection.stateUpdateHandler = { state in
-                if case .ready = state {
+                switch state {
+                case .ready, .failed, .cancelled:
+                    connection.stateUpdateHandler = nil
                     continuation.resume()
-                } else if case .failed = state {
-                    continuation.resume()
-                } else if case .cancelled = state {
-                    continuation.resume()
+                default:
+                    break
                 }
             }
             connection.start(queue: .global(qos: .userInitiated))
