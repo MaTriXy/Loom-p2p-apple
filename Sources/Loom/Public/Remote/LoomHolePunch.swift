@@ -38,6 +38,7 @@ public enum LoomHolePunch {
             host: .ipv4(.any),
             port: NWEndpoint.Port(rawValue: localPort) ?? .any
         )
+        params.allowLocalEndpointReuse = true
 
         let connection = NWConnection(
             host: host,

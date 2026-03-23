@@ -31,6 +31,10 @@ public actor LoomRemoteSignalingWebSocket {
     private var webSocketTask: URLSessionWebSocketTask?
     private var receiveTask: Task<Void, Never>?
     private var eventContinuation: AsyncStream<LoomSignalingWebSocketEvent>.Continuation?
+    private var _isAlive = false
+
+    /// Whether the WebSocket connection is alive and receiving events.
+    public var isAlive: Bool { _isAlive }
 
     /// Stream of signaling events.  Subscribe to this to receive real-time
     /// notifications from the signaling server.
@@ -85,6 +89,7 @@ public actor LoomRemoteSignalingWebSocket {
 
         let task = URLSession.shared.webSocketTask(with: request)
         webSocketTask = task
+        _isAlive = true
         task.resume()
 
         receiveTask = Task { [weak self] in
@@ -99,6 +104,9 @@ public actor LoomRemoteSignalingWebSocket {
         receiveTask = nil
         webSocketTask?.cancel(with: .goingAway, reason: nil)
         webSocketTask = nil
+        _isAlive = false
+        eventContinuation?.finish()
+        eventContinuation = nil
     }
 
     // MARK: - Private
@@ -125,6 +133,9 @@ public actor LoomRemoteSignalingWebSocket {
                 break
             }
         }
+        _isAlive = false
+        eventContinuation?.finish()
+        eventContinuation = nil
     }
 
     private func handleMessage(_ text: String) {

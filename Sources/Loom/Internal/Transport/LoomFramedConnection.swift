@@ -45,6 +45,12 @@ package actor LoomFramedConnection: LoomSessionTransport {
                     completion.complete(.failure(LoomError.connectionFailed(CancellationError())))
                 case .waiting(let error):
                     LoomLogger.transport("TCP/QUIC connection waiting: \(error)")
+                    if case .posix(let code) = error,
+                       ([.ENETDOWN, .EHOSTUNREACH, .ENETUNREACH] as [POSIXErrorCode]).contains(code) {
+                        DispatchQueue.global().asyncAfter(deadline: .now() + 2) {
+                            completion.complete(.failure(LoomError.connectionFailed(error)))
+                        }
+                    }
                 default:
                     break
                 }

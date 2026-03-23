@@ -97,6 +97,15 @@ package actor LoomReliableChannel: LoomSessionTransport {
                     box.complete(.failure(LoomError.connectionFailed(CancellationError())))
                 case .waiting(let error):
                     LoomLogger.transport("UDP connection waiting: \(error)")
+                    if case .posix(let code) = error,
+                       ([.ENETDOWN, .EHOSTUNREACH, .ENETUNREACH] as [POSIXErrorCode]).contains(code) {
+                        // Give the interface 2 seconds to come up; if .ready
+                        // fires first the box is already consumed and this
+                        // completion is a safe no-op.
+                        DispatchQueue.global().asyncAfter(deadline: .now() + 2) {
+                            box.complete(.failure(LoomError.connectionFailed(error)))
+                        }
+                    }
                 default:
                     break
                 }

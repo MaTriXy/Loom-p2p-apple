@@ -141,30 +141,58 @@ public final class LoomNode {
         requiredLocalPort: UInt16? = nil,
         queue: DispatchQueue = .global(qos: .userInitiated)
     ) async throws -> LoomAuthenticatedSession {
-        let connection = try makeConnection(
-            to: endpoint,
-            using: transportKind,
-            enablePeerToPeer: enablePeerToPeer,
-            requiredInterfaceType: requiredInterfaceType,
-            requiredLocalPort: requiredLocalPort
-        )
-        let identityManager = self.identityManager ?? LoomIdentityManager.shared
-        let session = makeAuthenticatedSession(
-            connection: connection,
-            role: .initiator,
-            transportKind: transportKind
-        )
-        return try await withTaskCancellationHandler {
-            _ = try await session.start(
-                localHello: hello,
-                identityManager: identityManager,
-                trustProvider: trustProvider,
-                encryptionPolicy: encryptionPolicy,
-                queue: queue
+        // Pre-resolve .local mDNS hostnames to IP addresses so the
+        // NWConnection doesn't stall in .waiting(ENETDOWN) on first use.
+        let resolvedEndpoint: NWEndpoint
+        if case .hostPort(let host, let port) = endpoint,
+           case .name(let hostname, _) = host,
+           hostname.lowercased().hasSuffix(".local") || hostname.lowercased().hasSuffix(".local.") {
+            resolvedEndpoint = try await LoomEndpointResolver.resolveHostPort(
+                host: hostname,
+                port: port.rawValue
             )
-            return session
-        } onCancel: {
-            connection.cancel()
+        } else {
+            resolvedEndpoint = endpoint
+        }
+
+        let identityManager = self.identityManager ?? LoomIdentityManager.shared
+
+        func attemptConnect(to target: NWEndpoint) async throws -> LoomAuthenticatedSession {
+            let conn = try makeConnection(
+                to: target,
+                using: transportKind,
+                enablePeerToPeer: enablePeerToPeer,
+                requiredInterfaceType: requiredInterfaceType,
+                requiredLocalPort: requiredLocalPort
+            )
+            let sess = makeAuthenticatedSession(
+                connection: conn,
+                role: .initiator,
+                transportKind: transportKind
+            )
+            return try await withTaskCancellationHandler {
+                _ = try await sess.start(
+                    localHello: hello,
+                    identityManager: identityManager,
+                    trustProvider: trustProvider,
+                    encryptionPolicy: encryptionPolicy,
+                    queue: queue
+                )
+                return sess
+            } onCancel: {
+                conn.cancel()
+            }
+        }
+
+        do {
+            return try await attemptConnect(to: resolvedEndpoint)
+        } catch let error as LoomError {
+            // NWConnection's first UDP socket binding can stall with ENETDOWN
+            // when the interface path hasn't been exercised yet. A fresh
+            // NWConnection to the same endpoint succeeds immediately.
+            guard Self.isTransientNetworkDown(error) else { throw error }
+            LoomLogger.transport("Recreating connection after transient ENETDOWN")
+            return try await attemptConnect(to: resolvedEndpoint)
         }
     }
 
@@ -351,6 +379,16 @@ public final class LoomNode {
         }
         _ = try await probeServer.start()
         overlayProbeServer = probeServer
+    }
+
+    private static func isTransientNetworkDown(_ error: LoomError) -> Bool {
+        guard case .connectionFailed(let underlying) = error else { return false }
+        if let nwError = underlying as? NWError,
+           case .posix(let code) = nwError,
+           ([.ENETDOWN, .EHOSTUNREACH, .ENETUNREACH] as [POSIXErrorCode]).contains(code) {
+            return true
+        }
+        return false
     }
 
     private static func advertisement(
