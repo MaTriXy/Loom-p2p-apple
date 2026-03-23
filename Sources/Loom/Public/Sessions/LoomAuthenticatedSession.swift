@@ -208,8 +208,7 @@ public actor LoomAuthenticatedSession: LoomSessionProtocol {
         }
 
         updateState(.handshaking)
-        rawSession.start(queue: queue)
-        try await transport.awaitReady()
+        try await transport.startAndAwaitReady(queue: queue)
 
         let preparedHello = try await MainActor.run {
             try LoomSessionHelloValidator.makePreparedSignedHello(

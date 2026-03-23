@@ -81,13 +81,12 @@ public actor LoomBootstrapControlServer {
     }
 
     private func handleConnection(_ connection: NWConnection) async {
-        connection.start(queue: .global(qos: .utility))
         defer { connection.cancel() }
 
         var requestID: UUID?
 
         do {
-            try await awaitReady(connection)
+            try await startAndAwaitReady(connection, queue: .global(qos: .utility))
             let requestData = try await receiveLine(
                 over: connection,
                 maxBytes: LoomMessageLimits.maxBootstrapControlLineBytes
@@ -176,29 +175,22 @@ public actor LoomBootstrapControlServer {
         )
     }
 
-    private func awaitReady(_ connection: NWConnection) async throws {
-        if connection.state != .ready {
-            try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
-                let completion = BootstrapServerReadyContinuationBox(continuation: continuation)
-                connection.stateUpdateHandler = { state in
-                    switch state {
-                    case .ready:
-                        completion.complete(.success(()))
-                    case let .failed(error):
-                        completion.complete(.failure(LoomBootstrapControlError.connectionFailed(error.localizedDescription)))
-                    case .cancelled:
-                        completion.complete(.failure(LoomBootstrapControlError.connectionFailed("Connection cancelled.")))
-                    default:
-                        break
-                    }
-                }
-                // Re-check after handler assignment: if .ready fired between the
-                // outer guard and here, the handler missed it. The lock inside
-                // BootstrapServerReadyContinuationBox ensures only one completion wins.
-                if connection.state == .ready {
+    private func startAndAwaitReady(_ connection: NWConnection, queue: DispatchQueue) async throws {
+        try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
+            let completion = BootstrapServerReadyContinuationBox(continuation: continuation)
+            connection.stateUpdateHandler = { state in
+                switch state {
+                case .ready:
                     completion.complete(.success(()))
+                case let .failed(error):
+                    completion.complete(.failure(LoomBootstrapControlError.connectionFailed(error.localizedDescription)))
+                case .cancelled:
+                    completion.complete(.failure(LoomBootstrapControlError.connectionFailed("Connection cancelled.")))
+                default:
+                    break
                 }
             }
+            connection.start(queue: queue)
         }
     }
 

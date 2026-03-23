@@ -12,8 +12,11 @@ import Foundation
 /// `LoomFramedConnection` (TCP/QUIC) and `LoomReliableChannel` (UDP) both conform,
 /// allowing `LoomAuthenticatedSession` to be transport-agnostic.
 package protocol LoomSessionTransport: Sendable {
-    /// Block until the underlying connection is ready for I/O.
-    func awaitReady() async throws
+    /// Start the underlying connection and block until it is ready for I/O.
+    ///
+    /// Sets the `stateUpdateHandler` **before** calling `NWConnection.start(queue:)`
+    /// so that no state transitions are lost — per Apple's Network.framework documentation.
+    func startAndAwaitReady(queue: DispatchQueue) async throws
 
     /// Send a complete message reliably (ordered, retransmitted if needed).
     func sendMessage(_ data: Data) async throws

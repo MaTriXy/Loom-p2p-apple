@@ -83,11 +83,10 @@ package actor LoomOverlayProbeServer {
     }
 
     private func handle(connection: NWConnection) async {
-        connection.start(queue: .global(qos: .userInitiated))
         let framedConnection = LoomFramedConnection(connection: connection)
 
         do {
-            try await framedConnection.awaitReady()
+            try await framedConnection.startAndAwaitReady(queue: .global(qos: .userInitiated))
             let requestData = try await framedConnection.readFrame(
                 maxBytes: LoomMessageLimits.maxHelloFrameBytes
             )
@@ -123,11 +122,10 @@ package enum LoomOverlayProbeClient {
             using: parameters
         )
         let framedConnection = LoomFramedConnection(connection: connection)
-        connection.start(queue: .global(qos: .userInitiated))
 
         do {
             let responseData = try await withThrowingTimeout(timeout) {
-                try await framedConnection.awaitReady()
+                try await framedConnection.startAndAwaitReady(queue: .global(qos: .userInitiated))
                 let request = LoomOverlayProbeRequest()
                 try await framedConnection.sendFrame(JSONEncoder().encode(request))
                 return try await framedConnection.readFrame(

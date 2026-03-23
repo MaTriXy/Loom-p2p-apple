@@ -84,32 +84,25 @@ package actor LoomReliableChannel: LoomSessionTransport {
 
     // MARK: - LoomSessionTransport
 
-    package func awaitReady() async throws {
-        // UDP connections transition to .ready almost instantly after start() —
-        // often before this method is called. Check current state first to avoid
-        // a lost-event race where the .ready transition already fired.
-        if connection.state != .ready {
-            try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
-                let box = ReadyContinuationBox(continuation: continuation)
-                connection.stateUpdateHandler = { state in
-                    switch state {
-                    case .ready:
-                        box.complete(.success(()))
-                    case let .failed(error):
-                        box.complete(.failure(LoomError.connectionFailed(error)))
-                    case .cancelled:
-                        box.complete(.failure(LoomError.connectionFailed(CancellationError())))
-                    default:
-                        break
-                    }
-                }
-                // Re-check after handler assignment: if .ready fired between the
-                // outer guard and here, the handler missed it. The lock inside
-                // ReadyContinuationBox ensures only one completion wins.
-                if connection.state == .ready {
+    package func startAndAwaitReady(queue: DispatchQueue) async throws {
+        try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
+            let box = ReadyContinuationBox(continuation: continuation)
+            connection.stateUpdateHandler = { state in
+                switch state {
+                case .ready:
                     box.complete(.success(()))
+                case let .failed(error):
+                    box.complete(.failure(LoomError.connectionFailed(error)))
+                case .cancelled:
+                    box.complete(.failure(LoomError.connectionFailed(CancellationError())))
+                case .waiting(let error):
+                    LoomLogger.transport("UDP connection waiting: \(error)")
+                default:
+                    break
                 }
             }
+            // Handler is set — now start. All state transitions are captured.
+            connection.start(queue: queue)
         }
         startReceiveLoop()
         startRetryTimer()
