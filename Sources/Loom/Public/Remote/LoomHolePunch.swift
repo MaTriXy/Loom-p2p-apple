@@ -9,6 +9,7 @@
 
 import Foundation
 import Network
+import os
 
 /// Sends small UDP packets to a remote endpoint from a specific local port,
 /// opening a NAT binding that allows the remote peer to reach back.
@@ -47,11 +48,22 @@ public enum LoomHolePunch {
         )
 
         await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
+            // NWConnection state callbacks fire on the GCD concurrent queue and
+            // can race (e.g. .ready then .cancelled in quick succession).  Use
+            // an atomic flag to guarantee the continuation resumes exactly once.
+            let resumed = OSAllocatedUnfairLock(initialState: false)
             connection.stateUpdateHandler = { state in
                 switch state {
                 case .ready, .failed, .cancelled:
                     connection.stateUpdateHandler = nil
-                    continuation.resume()
+                    let alreadyResumed = resumed.withLock { done -> Bool in
+                        if done { return true }
+                        done = true
+                        return false
+                    }
+                    if !alreadyResumed {
+                        continuation.resume()
+                    }
                 default:
                     break
                 }

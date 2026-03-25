@@ -34,6 +34,7 @@ package actor LoomDirectListener {
             quicALPN: quicALPN
         )
         let actualPort: NWEndpoint.Port = port == 0 ? .any : NWEndpoint.Port(rawValue: port) ?? .any
+        parameters.allowLocalEndpointReuse = true
         listener = try NWListener(using: parameters, on: actualPort)
         listener?.newConnectionHandler = onConnection
         guard let listener else {

@@ -64,6 +64,7 @@ actor BonjourAdvertiser {
         }
 
         let actualPort: NWEndpoint.Port = port == 0 ? .any : NWEndpoint.Port(rawValue: port)!
+        parameters.allowLocalEndpointReuse = true
 
         listener = try NWListener(using: parameters, on: actualPort)
 
