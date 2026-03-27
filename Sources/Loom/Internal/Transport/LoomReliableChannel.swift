@@ -144,6 +144,11 @@ package actor LoomReliableChannel: LoomSessionTransport {
                 throw LoomError.protocolError("Message too large to fragment (\(data.count) bytes).")
             }
 
+            // Send fragments in batches with yields between batches to avoid
+            // overwhelming the NWConnection's kernel send buffer. Without
+            // backpressure, ~950 fragments (for a 1MB payload) saturate the
+            // UDP send buffer and cause the connection to be cancelled.
+            let sendBatchSize = 16
             for i in 0..<totalFragments {
                 let start = i * fragmentPayload
                 let end = min(start + fragmentPayload, data.count)
@@ -163,6 +168,12 @@ package actor LoomReliableChannel: LoomSessionTransport {
                 trackPending(seq: seq, packet: packet)
                 clearNeedsAck()
                 try await sendRaw(packet)
+
+                // Yield after each batch to let the kernel drain its send buffer.
+                // Larger messages need more breathing room to avoid buffer saturation.
+                if (i + 1) % sendBatchSize == 0, i + 1 < totalFragments {
+                    try await Task.sleep(for: .milliseconds(2))
+                }
             }
         }
     }

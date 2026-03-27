@@ -19,6 +19,7 @@ public final class LoomNode {
     public private(set) var discovery: LoomDiscovery?
 
     private var advertiser: BonjourAdvertiser?
+    private var advertisingServiceName: String?
     private var directListeners: [LoomTransportKind: LoomDirectListener] = [:]
     private var directListenerPorts: [LoomTransportKind: UInt16] = [:]
     private var overlayProbeServer: LoomOverlayProbeServer?
@@ -56,6 +57,7 @@ public final class LoomNode {
         advertisement: LoomPeerAdvertisement,
         onSession: @escaping @Sendable (LoomSession) -> Void
     ) async throws -> UInt16 {
+        advertisingServiceName = serviceName
         let advertiser = BonjourAdvertiser(
             serviceName: serviceName,
             advertisement: advertisement,
@@ -73,6 +75,7 @@ public final class LoomNode {
         self.overlayProbeServer = nil
         let advertiser = self.advertiser
         self.advertiser = nil
+        advertisingServiceName = nil
         let directListeners = self.directListeners.values
         self.directListeners.removeAll()
         self.directListenerPorts.removeAll()
@@ -91,7 +94,11 @@ public final class LoomNode {
         if let bonjourPort = await advertiser?.port {
             ports[.tcp] = bonjourPort
         }
-        let merged = Self.advertisement(advertisement, withDirectTransportPorts: ports)
+        let merged = Self.advertisement(
+            advertisement,
+            withDirectTransportPorts: ports,
+            serviceName: advertisingServiceName
+        )
         await advertiser?.updateAdvertisement(merged)
     }
 
@@ -239,7 +246,8 @@ public final class LoomNode {
             await updateAdvertisement(
                 Self.advertisement(
                     baseHello.advertisement,
-                    withDirectTransportPorts: ports
+                    withDirectTransportPorts: ports,
+                    serviceName: advertisingServiceName
                 )
             )
 
@@ -283,7 +291,8 @@ public final class LoomNode {
                 await updateAdvertisement(
                     Self.advertisement(
                         baseHello.advertisement,
-                        withDirectTransportPorts: ports
+                        withDirectTransportPorts: ports,
+                        serviceName: advertisingServiceName
                     )
                 )
             }
@@ -330,7 +339,8 @@ public final class LoomNode {
             await updateAdvertisement(
                 Self.advertisement(
                     baseHello.advertisement,
-                    withDirectTransportPorts: ports
+                    withDirectTransportPorts: ports,
+                    serviceName: advertisingServiceName
                 )
             )
             try await startOverlayProbeServer(serviceName: serviceName)
@@ -372,9 +382,10 @@ public final class LoomNode {
         return false
     }
 
-    private static func advertisement(
+    nonisolated static func advertisement(
         _ base: LoomPeerAdvertisement,
-        withDirectTransportPorts ports: [LoomTransportKind: UInt16]
+        withDirectTransportPorts ports: [LoomTransportKind: UInt16],
+        serviceName: String?
     ) -> LoomPeerAdvertisement {
         let pathKindsByTransport = base.directTransports.reduce(into: [LoomTransportKind: LoomDirectPathKind?]()) { partialResult, transport in
             partialResult[transport.transportKind] = transport.pathKind
@@ -398,7 +409,7 @@ public final class LoomNode {
             modelIdentifier: base.modelIdentifier,
             iconName: base.iconName,
             machineFamily: base.machineFamily,
-            hostName: base.hostName ?? ProcessInfo.processInfo.hostName,
+            hostName: base.hostName,
             directTransports: directTransports,
             metadata: base.metadata
         )
@@ -452,4 +463,3 @@ public final class LoomSession: @unchecked Sendable, Hashable {
         hasher.combine(ObjectIdentifier(self))
     }
 }
-
