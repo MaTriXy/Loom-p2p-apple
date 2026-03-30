@@ -53,19 +53,23 @@ public final class LoomMultiplexedStream: @unchecked Sendable, Hashable {
     private var continuation: AsyncStream<Data>.Continuation?
     private let sendHandler: @Sendable (Data) async throws -> Void
     private let unreliableSendHandler: @Sendable (Data) async throws -> Void
+    private let queuedUnreliableSendHandler: @Sendable (Data, @escaping @Sendable (Error?) -> Void) async -> Void
     private let closeHandler: @Sendable () async throws -> Void
+    private let queuedUnreliableSubmitter = LoomOrderedAsyncSubmitter()
 
     package init(
         id: UInt16,
         label: String?,
         sendHandler: @escaping @Sendable (Data) async throws -> Void,
         unreliableSendHandler: @escaping @Sendable (Data) async throws -> Void,
+        queuedUnreliableSendHandler: @escaping @Sendable (Data, @escaping @Sendable (Error?) -> Void) async -> Void,
         closeHandler: @escaping @Sendable () async throws -> Void
     ) {
         self.id = id
         self.label = label
         self.sendHandler = sendHandler
         self.unreliableSendHandler = unreliableSendHandler
+        self.queuedUnreliableSendHandler = queuedUnreliableSendHandler
         self.closeHandler = closeHandler
         let (stream, continuation) = AsyncStream.makeStream(of: Data.self)
         incomingBytes = stream
@@ -80,8 +84,34 @@ public final class LoomMultiplexedStream: @unchecked Sendable, Hashable {
         try await unreliableSendHandler(data)
     }
 
+    /// Queues an unreliable payload for ordered transmission without waiting for
+    /// the underlying `NWConnection.send` completion before returning.
+    ///
+    /// Completion runs later on transport acceptance or failure.
+    public func sendUnreliableQueued(
+        _ data: Data,
+        onComplete: @escaping @Sendable (Error?) -> Void = { _ in }
+    ) {
+        queuedUnreliableSubmitter.enqueue(
+            operation: { [queuedUnreliableSendHandler] markQueued in
+                Task {
+                    await queuedUnreliableSendHandler(data, onComplete)
+                    markQueued()
+                }
+            },
+            onDropped: {
+                onComplete(
+                    LoomError.connectionFailed(
+                        LoomConnectionFailure(reason: .cancelled, detail: "Unreliable send queue cancelled.")
+                    )
+                )
+            }
+        )
+    }
+
     public func close() async throws {
         try await closeHandler()
+        finishQueuedOutbound()
         finishInbound()
     }
 
@@ -106,6 +136,10 @@ public final class LoomMultiplexedStream: @unchecked Sendable, Hashable {
         self.continuation = nil
         lock.unlock()
         continuation?.finish()
+    }
+
+    package func finishQueuedOutbound() {
+        queuedUnreliableSubmitter.close()
     }
 }
 
@@ -431,6 +465,15 @@ public actor LoomAuthenticatedSession: LoomSessionProtocol {
                 }
                 try await self.sendEnvelope(envelopeForData(data), reliable: false)
             },
+            queuedUnreliableSendHandler: { [weak self] data, onComplete in
+                guard let self else {
+                    onComplete(
+                        LoomError.protocolError("Authenticated Loom session no longer exists.")
+                    )
+                    return
+                }
+                await self.sendEnvelopeQueued(envelopeForData(data), onComplete: onComplete)
+            },
             closeHandler: { [weak self] in
                 guard let self else {
                     throw LoomError.protocolError("Authenticated Loom session no longer exists.")
@@ -456,6 +499,28 @@ public actor LoomAuthenticatedSession: LoomSessionProtocol {
         _ envelope: LoomSessionStreamEnvelope,
         reliable: Bool = true
     ) async throws {
+        let wireFrame = try encodeWireFrame(for: envelope)
+
+        if reliable {
+            try await transport.sendMessage(wireFrame)
+        } else {
+            try await transport.sendUnreliable(wireFrame)
+        }
+    }
+
+    private func sendEnvelopeQueued(
+        _ envelope: LoomSessionStreamEnvelope,
+        onComplete: @escaping @Sendable (Error?) -> Void
+    ) async {
+        do {
+            let wireFrame = try encodeWireFrame(for: envelope)
+            await transport.sendUnreliableQueued(wireFrame, onComplete: onComplete)
+        } catch {
+            onComplete(error)
+        }
+    }
+
+    private func encodeWireFrame(for envelope: LoomSessionStreamEnvelope) throws -> Data {
         let trafficClass = envelope.kind == .data ? LoomSessionTrafficClass.data : .control
         let encodedEnvelope = try envelope.encode()
 
@@ -478,12 +543,7 @@ public actor LoomAuthenticatedSession: LoomSessionProtocol {
             frame.append(encodedEnvelope)
             wireFrame = frame
         }
-
-        if reliable {
-            try await transport.sendMessage(wireFrame)
-        } else {
-            try await transport.sendUnreliable(wireFrame)
-        }
+        return wireFrame
     }
 
     private func decryptEnvelope(_ wireFrame: Data) throws -> LoomSessionStreamEnvelope {
@@ -680,7 +740,11 @@ public actor LoomAuthenticatedSession: LoomSessionProtocol {
         updateState(newState)
         readTask?.cancel()
         unreliableReadTask?.cancel()
+        Task {
+            await transport.cancelPendingUnreliableSends()
+        }
         for stream in streams.values {
+            stream.finishQueuedOutbound()
             stream.finishInbound()
         }
         streams.removeAll(keepingCapacity: false)

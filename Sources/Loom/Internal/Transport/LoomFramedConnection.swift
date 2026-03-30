@@ -7,14 +7,20 @@
 
 import Foundation
 import Network
+import Dispatch
 
 package actor LoomFramedConnection: LoomSessionTransport {
     private let connection: NWConnection
+    private let queuedUnreliableSender: LoomOrderedUnreliableSendQueue
     private var receiveBuffer = Data()
     package let receiveSemantics: LoomSessionReceiveSemantics = .singleLane
 
     package init(connection: NWConnection) {
         self.connection = connection
+        queuedUnreliableSender = LoomOrderedUnreliableSendQueue(
+            connection: connection,
+            queue: DispatchQueue(label: "loom.framed.unreliable.send", qos: .userInteractive)
+        )
     }
 
     package func sendMessage(_ data: Data) async throws {
@@ -29,8 +35,23 @@ package actor LoomFramedConnection: LoomSessionTransport {
         try await sendFrame(data)
     }
 
+    package func sendUnreliableQueued(_ data: Data, onComplete: @escaping @Sendable (Error?) -> Void) async {
+        let frame = framedData(for: data)
+        queuedUnreliableSender.enqueue(frame) { error in
+            if let error {
+                onComplete(LoomError.connectionFailed(LoomConnectionFailure.classify(error)))
+            } else {
+                onComplete(nil)
+            }
+        }
+    }
+
     package func receiveUnreliable(maxBytes: Int) async throws -> Data {
         try await readFrame(maxBytes: maxBytes)
+    }
+
+    package func cancelPendingUnreliableSends() async {
+        queuedUnreliableSender.close()
     }
 
     package func startAndAwaitReady(queue: DispatchQueue) async throws {
@@ -68,11 +89,16 @@ package actor LoomFramedConnection: LoomSessionTransport {
     }
 
     package func sendFrame(_ data: Data) async throws {
+        let frame = framedData(for: data)
+        try await send(frame)
+    }
+
+    private func framedData(for data: Data) -> Data {
         var frame = Data(capacity: 4 + data.count)
         let length = UInt32(data.count).bigEndian
         withUnsafeBytes(of: length) { frame.append(contentsOf: $0) }
         frame.append(data)
-        try await send(frame)
+        return frame
     }
 
     package func readFrame(maxBytes: Int = 1_048_576) async throws -> Data {

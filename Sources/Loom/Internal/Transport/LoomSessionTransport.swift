@@ -36,6 +36,17 @@ package protocol LoomSessionTransport: Sendable {
     /// Send a message without reliability guarantees (fire-and-forget, no retransmission).
     func sendUnreliable(_ data: Data) async throws
 
+    /// Enqueue an unreliable message for ordered, non-blocking transmission.
+    ///
+    /// The method returns after the transport has accepted the payload for send
+    /// scheduling. Completion runs later when Network.framework either accepts
+    /// or rejects the underlying send operation.
+    func sendUnreliableQueued(_ data: Data, onComplete: @escaping @Sendable (Error?) -> Void) async
+
     /// Receive the next unreliable message.
     func receiveUnreliable(maxBytes: Int) async throws -> Data
+
+    /// Cancel any pending queued unreliable sends that have not yet been
+    /// submitted to the underlying connection.
+    func cancelPendingUnreliableSends() async
 }

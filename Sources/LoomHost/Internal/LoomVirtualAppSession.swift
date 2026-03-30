@@ -137,6 +137,14 @@ package actor LoomVirtualAppSession: LoomSessionProtocol {
             unreliableSendHandler: { [connectionID, sendHandler] data in
                 try await sendHandler(connectionID, id, data)
             },
+            queuedUnreliableSendHandler: { [connectionID, sendHandler] data, onComplete in
+                do {
+                    try await sendHandler(connectionID, id, data)
+                    onComplete(nil)
+                } catch {
+                    onComplete(error)
+                }
+            },
             closeHandler: { [connectionID, closeHandler] in
                 try await closeHandler(connectionID, id)
             }
@@ -147,6 +155,7 @@ package actor LoomVirtualAppSession: LoomSessionProtocol {
         let liveStreams = streams.values
         streams.removeAll(keepingCapacity: false)
         for stream in liveStreams {
+            stream.finishQueuedOutbound()
             stream.finishInbound()
         }
         incomingStreamObservers.finish()

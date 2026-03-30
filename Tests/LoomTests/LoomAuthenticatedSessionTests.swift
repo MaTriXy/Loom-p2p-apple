@@ -188,6 +188,57 @@ struct LoomAuthenticatedSessionTests {
     }
 
     @MainActor
+    @Test("TCP authenticated sessions keep queued unreliable payloads coherent")
+    func tcpSessionKeepsQueuedUnreliablePayloadsCoherent() async throws {
+        let pair = try await makeLoopbackPair()
+        defer {
+            Task {
+                await pair.stop()
+            }
+        }
+
+        async let clientContext = pair.client.start(
+            localHello: pair.clientHello,
+            identityManager: pair.clientIdentityManager
+        )
+        async let serverContext = pair.server.start(
+            localHello: pair.serverHello,
+            identityManager: pair.serverIdentityManager
+        )
+        _ = try await (clientContext, serverContext)
+
+        let incomingStreamTask = Task<LoomMultiplexedStream?, Never> {
+            for await stream in pair.server.incomingStreams {
+                return stream
+            }
+            return nil
+        }
+
+        let mediaStream = try await pair.client.openStream(label: "video/queued")
+        let serverMediaStream = try #require(await incomingStreamTask.value)
+        let expectedPayloads = (0 ..< 12).map { Data("queued-media-\($0)".utf8) }
+        let completionCount = AsyncBox<Int>()
+
+        let receivedPayloadsTask = Task {
+            await collectPayloads(from: serverMediaStream, count: expectedPayloads.count)
+        }
+
+        for payload in expectedPayloads {
+            mediaStream.sendUnreliableQueued(payload) { error in
+                #expect(error == nil)
+                Task {
+                    await completionCount.increment()
+                }
+            }
+        }
+
+        #expect(await receivedPayloadsTask.value == expectedPayloads)
+        let completed = try #require(await completionCount.takeCount(target: expectedPayloads.count, timeoutSeconds: 2.0))
+        #expect(completed == expectedPayloads.count)
+        try await mediaStream.close()
+    }
+
+    @MainActor
     @Test("UDP authenticated session blackhole surfaces a timeout failure")
     func udpBlackholeSurfacesTimeoutFailure() async throws {
         let listener = try NWListener(using: .udp, on: .any)
@@ -539,5 +590,23 @@ private actor AsyncBox<Value: Sendable> {
         return await withCheckedContinuation { continuation in
             continuations.append(continuation)
         }
+    }
+
+    func increment() where Value == Int {
+        let nextValue = (value ?? 0) + 1
+        if let continuation = continuations.first {
+            continuations.removeFirst()
+            continuation.resume(returning: nextValue)
+            return
+        }
+        value = nextValue
+    }
+
+    func takeCount(target: Int, timeoutSeconds: TimeInterval) async -> Int? where Value == Int {
+        let deadline = CFAbsoluteTimeGetCurrent() + timeoutSeconds
+        while (value ?? 0) < target, CFAbsoluteTimeGetCurrent() < deadline {
+            try? await Task.sleep(for: .milliseconds(10))
+        }
+        return value
     }
 }

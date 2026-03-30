@@ -599,6 +599,9 @@ private func makeIncomingShellStream() -> LoomMultiplexedStream {
         label: LoomShellProtocol.streamLabel,
         sendHandler: { _ in },
         unreliableSendHandler: { _ in },
+        queuedUnreliableSendHandler: { _, onComplete in
+            onComplete(nil)
+        },
         closeHandler: {}
     )
 }
