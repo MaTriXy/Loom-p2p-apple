@@ -171,20 +171,32 @@ public actor LoomAuthenticatedSession: LoomSessionProtocol {
 
     public private(set) var state: LoomAuthenticatedSessionState = .idle
     public private(set) var context: LoomAuthenticatedSessionContext?
+    public private(set) var bootstrapProgress = LoomAuthenticatedSessionBootstrapProgress(phase: .idle)
 
     /// Called on the initiator (client) when the receiver (host) signals
     /// that trust evaluation is pending manual approval.
     public var onTrustPending: (@Sendable @MainActor () -> Void)?
+
+    /// Called when authenticated-session bootstrap advances before the session becomes ready.
+    public var onBootstrapProgress: (@Sendable (LoomAuthenticatedSessionBootstrapProgress) -> Void)?
 
     /// Sets the trust-pending callback from outside the actor.
     public func setOnTrustPending(_ handler: (@Sendable @MainActor () -> Void)?) {
         onTrustPending = handler
     }
 
+    /// Sets the bootstrap-progress callback from outside the actor.
+    public func setOnBootstrapProgress(
+        _ handler: (@Sendable (LoomAuthenticatedSessionBootstrapProgress) -> Void)?
+    ) {
+        onBootstrapProgress = handler
+    }
+
     private let transport: any LoomSessionTransport
     private let incomingStreamContinuation: AsyncStream<LoomMultiplexedStream>.Continuation
     private let incomingStreamObservers = LoomAsyncBroadcaster<LoomMultiplexedStream>()
     private let stateObservers = LoomAsyncBroadcaster<LoomAuthenticatedSessionState>()
+    private let bootstrapProgressObservers = LoomAsyncBroadcaster<LoomAuthenticatedSessionBootstrapProgress>()
     private let pathObservers = LoomAsyncBroadcaster<LoomSessionNetworkPathSnapshot>()
     private var streams: [UInt16: LoomMultiplexedStream] = [:]
     private var nextOutgoingStreamID: UInt16
@@ -221,6 +233,7 @@ public actor LoomAuthenticatedSession: LoomSessionProtocol {
         incomingStreamContinuation.finish()
         incomingStreamObservers.finish()
         stateObservers.finish()
+        bootstrapProgressObservers.finish()
         pathObservers.finish()
         readTask?.cancel()
         unreliableReadTask?.cancel()
@@ -234,6 +247,11 @@ public actor LoomAuthenticatedSession: LoomSessionProtocol {
     /// Creates an observation stream for lifecycle state transitions.
     public func makeStateObserver() -> AsyncStream<LoomAuthenticatedSessionState> {
         stateObservers.makeStream(initialValue: state)
+    }
+
+    /// Creates an observation stream for bootstrap progress before the session becomes ready.
+    public func makeBootstrapProgressObserver() -> AsyncStream<LoomAuthenticatedSessionBootstrapProgress> {
+        bootstrapProgressObservers.makeStream(initialValue: bootstrapProgress)
     }
 
     /// Returns the latest remote endpoint observed for this session's transport.
@@ -266,90 +284,100 @@ public actor LoomAuthenticatedSession: LoomSessionProtocol {
             throw LoomError.protocolError("Authenticated Loom session has already started.")
         }
 
-        updateState(.handshaking)
-        try await transport.startAndAwaitReady(queue: queue)
+        do {
+            updateState(.handshaking)
+            updateBootstrapProgress(phase: .transportStarting)
+            try await transport.startAndAwaitReady(queue: queue)
+            updateBootstrapProgress(phase: .transportReady)
 
-        let preparedHello = try await MainActor.run {
-            try LoomSessionHelloValidator.makePreparedSignedHello(
-                from: localHello,
-                identityManager: identityManager
+            let preparedHello = try await MainActor.run {
+                try LoomSessionHelloValidator.makePreparedSignedHello(
+                    from: localHello,
+                    identityManager: identityManager
+                )
+            }
+            let helloData = try JSONEncoder().encode(preparedHello.hello)
+            try await transport.sendMessage(helloData)
+            updateBootstrapProgress(phase: .localHelloSent)
+
+            let remoteHelloData = try await transport.receiveMessage(
+                maxBytes: LoomMessageLimits.maxHelloFrameBytes
             )
-        }
-        let helloData = try JSONEncoder().encode(preparedHello.hello)
-        try await transport.sendMessage(helloData)
+            let remoteHello = try JSONDecoder().decode(LoomSessionHello.self, from: remoteHelloData)
+            let validatedHello = try await helloValidator.validateDetailed(
+                remoteHello,
+                endpointDescription: rawSession.endpoint.debugDescription
+            )
+            let peerIdentity = validatedHello.peerIdentity
+            updateBootstrapProgress(phase: .remoteHelloReceived)
 
-        let remoteHelloData = try await transport.receiveMessage(
-            maxBytes: LoomMessageLimits.maxHelloFrameBytes
-        )
-        let remoteHello = try JSONDecoder().decode(LoomSessionHello.self, from: remoteHelloData)
-        let validatedHello = try await helloValidator.validateDetailed(
-            remoteHello,
-            endpointDescription: rawSession.endpoint.debugDescription
-        )
-        let peerIdentity = validatedHello.peerIdentity
+            let negotiatedFeatures = Array(
+                Set(localHello.supportedFeatures).intersection(remoteHello.supportedFeatures)
+            )
+            .sorted()
 
-        let negotiatedFeatures = Array(
-            Set(localHello.supportedFeatures).intersection(remoteHello.supportedFeatures)
-        )
-        .sorted()
+            let encryptionNegotiated = negotiatedFeatures.contains("loom.session-encryption.v1")
+            switch encryptionPolicy {
+            case .required:
+                guard encryptionNegotiated else {
+                    updateState(.failed("missing-session-encryption"))
+                    rawSession.cancel()
+                    throw LoomError.protocolError("Peer does not support Loom authenticated session encryption.")
+                }
+            case .optional:
+                break
+            }
 
-        let encryptionNegotiated = negotiatedFeatures.contains("loom.session-encryption.v1")
-        switch encryptionPolicy {
-        case .required:
-            guard encryptionNegotiated else {
-                updateState(.failed("missing-session-encryption"))
+            let trustEvaluation: LoomTrustEvaluation
+            if role == .receiver {
+                trustEvaluation = try await resolveAndSignalTrust(
+                    for: peerIdentity,
+                    trustProvider: trustProvider
+                )
+            } else {
+                trustEvaluation = try await receiveHostTrustStatus()
+            }
+            if trustEvaluation.decision == .denied {
+                updateState(.failed("denied"))
                 rawSession.cancel()
-                throw LoomError.protocolError("Peer does not support Loom authenticated session encryption.")
+                throw LoomError.authenticationFailed
             }
-        case .optional:
-            break
-        }
 
-        let trustEvaluation: LoomTrustEvaluation
-        if role == .receiver {
-            trustEvaluation = try await resolveAndSignalTrust(
-                for: peerIdentity,
-                trustProvider: trustProvider
-            )
-        } else {
-            trustEvaluation = try await receiveHostTrustStatus()
-        }
-        if trustEvaluation.decision == .denied {
-            updateState(.failed("denied"))
-            rawSession.cancel()
-            throw LoomError.authenticationFailed
-        }
-
-        if encryptionNegotiated {
-            securityContext = try LoomSessionSecurityContext(
-                role: role,
-                localHello: preparedHello.hello,
-                remoteHello: validatedHello.hello,
-                localEphemeralPrivateKey: preparedHello.ephemeralPrivateKey
-            )
-        }
-        encryptionEnabled = encryptionNegotiated
-
-        let context = LoomAuthenticatedSessionContext(
-            peerIdentity: peerIdentity,
-            peerAdvertisement: validatedHello.hello.advertisement,
-            trustEvaluation: trustEvaluation,
-            transportKind: transportKind,
-            negotiatedFeatures: negotiatedFeatures,
-            sessionEncrypted: encryptionNegotiated
-        )
-        self.context = context
-        configureTransportObserversIfNeeded()
-        updateState(.ready)
-        readTask = Task { [weak self] in
-            await self?.runReadLoop()
-        }
-        if transport.receiveSemantics == .independentReliableAndUnreliable {
-            unreliableReadTask = Task { [weak self] in
-                await self?.runUnreliableReadLoop()
+            if encryptionNegotiated {
+                securityContext = try LoomSessionSecurityContext(
+                    role: role,
+                    localHello: preparedHello.hello,
+                    remoteHello: validatedHello.hello,
+                    localEphemeralPrivateKey: preparedHello.ephemeralPrivateKey
+                )
             }
+            encryptionEnabled = encryptionNegotiated
+
+            let context = LoomAuthenticatedSessionContext(
+                peerIdentity: peerIdentity,
+                peerAdvertisement: validatedHello.hello.advertisement,
+                trustEvaluation: trustEvaluation,
+                transportKind: transportKind,
+                negotiatedFeatures: negotiatedFeatures,
+                sessionEncrypted: encryptionNegotiated
+            )
+            self.context = context
+            configureTransportObserversIfNeeded()
+            updateBootstrapProgress(phase: .ready)
+            updateState(.ready)
+            readTask = Task { [weak self] in
+                await self?.runReadLoop()
+            }
+            if transport.receiveSemantics == .independentReliableAndUnreliable {
+                unreliableReadTask = Task { [weak self] in
+                    await self?.runUnreliableReadLoop()
+                }
+            }
+            return context
+        } catch {
+            updateBootstrapFailure(reason: error.localizedDescription)
+            throw error
         }
-        return context
     }
 
     public func openStream(label: String? = nil) async throws -> LoomMultiplexedStream {
@@ -611,6 +639,7 @@ public actor LoomAuthenticatedSession: LoomSessionProtocol {
             group.addTask { [weak self] in
                 try? await Task.sleep(for: .milliseconds(500))
                 guard !Task.isCancelled, let self else { return nil }
+                await self.updateBootstrapProgress(phase: .trustPendingApproval)
                 try? await self.sendTrustStatus(.pendingApproval)
                 return nil
             }
@@ -647,6 +676,7 @@ public actor LoomAuthenticatedSession: LoomSessionProtocol {
             )
             switch status {
             case .pendingApproval:
+                updateBootstrapProgress(phase: .trustPendingApproval)
                 await onTrustPending?()
                 continue
             case .trusted:
@@ -671,6 +701,27 @@ public actor LoomAuthenticatedSession: LoomSessionProtocol {
     private func updateState(_ newState: LoomAuthenticatedSessionState) {
         state = newState
         stateObservers.yield(newState)
+    }
+
+    private func updateBootstrapProgress(
+        phase: LoomAuthenticatedSessionBootstrapPhase,
+        failureReason: String? = nil
+    ) {
+        let progress = LoomAuthenticatedSessionBootstrapProgress(
+            phase: phase,
+            failureReason: failureReason
+        )
+        bootstrapProgress = progress
+        bootstrapProgressObservers.yield(progress)
+        onBootstrapProgress?(progress)
+    }
+
+    private func updateBootstrapFailure(reason: String) {
+        guard bootstrapProgress.phase != .ready else { return }
+        updateBootstrapProgress(
+            phase: bootstrapProgress.phase == .idle ? .transportStarting : bootstrapProgress.phase,
+            failureReason: reason
+        )
     }
 
     private func configureTransportObserversIfNeeded() {
@@ -751,6 +802,7 @@ public actor LoomAuthenticatedSession: LoomSessionProtocol {
         incomingStreamContinuation.finish()
         incomingStreamObservers.finish()
         stateObservers.finish()
+        bootstrapProgressObservers.finish()
         pathObservers.finish()
         if cancelUnderlyingConnection {
             rawSession.cancel()

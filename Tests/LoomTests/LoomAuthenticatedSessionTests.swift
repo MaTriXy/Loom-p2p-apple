@@ -127,6 +127,45 @@ struct LoomAuthenticatedSessionTests {
     }
 
     @MainActor
+    @Test("Bootstrap progress observers emit phase transitions through ready")
+    func bootstrapProgressObserversEmitPhaseTransitionsThroughReady() async throws {
+        let pair = try await makeLoopbackPair()
+        defer {
+            Task {
+                await pair.stop()
+            }
+        }
+
+        let clientProgressTask = Task<[LoomAuthenticatedSessionBootstrapProgress], Never> {
+            let observer = await pair.client.makeBootstrapProgressObserver()
+            var events: [LoomAuthenticatedSessionBootstrapProgress] = []
+            for await progress in observer {
+                if events.last != progress {
+                    events.append(progress)
+                }
+                if progress.phase == .ready {
+                    break
+                }
+            }
+            return events
+        }
+
+        async let clientContext = pair.client.start(
+            localHello: pair.clientHello,
+            identityManager: pair.clientIdentityManager
+        )
+        async let serverContext = pair.server.start(
+            localHello: pair.serverHello,
+            identityManager: pair.serverIdentityManager
+        )
+        _ = try await (clientContext, serverContext)
+
+        let phases = await clientProgressTask.value.map(\.phase)
+        #expect(phases == [.idle, .transportStarting, .transportReady, .localHelloSent, .remoteHelloReceived, .ready])
+        #expect(await pair.client.bootstrapProgress == LoomAuthenticatedSessionBootstrapProgress(phase: .ready))
+    }
+
+    @MainActor
     @Test("TCP authenticated sessions keep reliable and sendUnreliable payloads coherent")
     func tcpSessionKeepsReliableAndUnreliablePayloadsCoherent() async throws {
         let pair = try await makeLoopbackPair()
@@ -269,6 +308,7 @@ struct LoomAuthenticatedSessionTests {
             role: .initiator,
             transportKind: .udp
         )
+        let progressObserver = await session.makeBootstrapProgressObserver()
         defer {
             Task {
                 await session.cancel()
@@ -297,6 +337,13 @@ struct LoomAuthenticatedSessionTests {
             let failure = LoomConnectionFailure.classify(underlying)
             #expect(failure.reason == .timedOut)
             #expect((failure.errorDescription ?? "").contains("timed out"))
+            let progress = await collectBootstrapProgress(
+                from: progressObserver,
+                throughFailure: true
+            )
+            let lastProgress = try #require(progress.last)
+            #expect(lastProgress.failureReason != nil)
+            #expect(lastProgress.phase == .localHelloSent)
         } catch {
             Issue.record("Expected LoomError.connectionFailed, got \(error.localizedDescription).")
         }
@@ -562,6 +609,22 @@ private func firstPathSnapshot(
         return snapshot
     }
     return nil
+}
+
+private func collectBootstrapProgress(
+    from stream: AsyncStream<LoomAuthenticatedSessionBootstrapProgress>,
+    throughFailure: Bool = false
+) async -> [LoomAuthenticatedSessionBootstrapProgress] {
+    var progressEvents: [LoomAuthenticatedSessionBootstrapProgress] = []
+    for await progress in stream {
+        if progressEvents.last != progress {
+            progressEvents.append(progress)
+        }
+        if progress.phase == .ready || (throughFailure && progress.isFailure) {
+            return progressEvents
+        }
+    }
+    return progressEvents
 }
 
 private actor AsyncBox<Value: Sendable> {

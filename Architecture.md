@@ -35,6 +35,7 @@ It owns:
 
 - peer discovery
 - transport and session lifecycle
+- authenticated-session bootstrap phase reporting
 - signaling/direct connectivity
 - identity and trust
 - replay protection

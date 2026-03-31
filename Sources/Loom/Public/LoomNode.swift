@@ -147,7 +147,8 @@ public final class LoomNode {
         requiredInterfaceType: NWInterface.InterfaceType? = nil,
         requiredLocalPort: UInt16? = nil,
         queue: DispatchQueue = .global(qos: .userInitiated),
-        onTrustPending: (@Sendable @MainActor () -> Void)? = nil
+        onTrustPending: (@Sendable @MainActor () -> Void)? = nil,
+        onBootstrapProgress: (@Sendable (LoomAuthenticatedSessionBootstrapProgress) -> Void)? = nil
     ) async throws -> LoomAuthenticatedSession {
         // Pre-resolve .local mDNS hostnames to IP addresses so the
         // NWConnection doesn't stall in .waiting(ENETDOWN) on first use.
@@ -179,6 +180,7 @@ public final class LoomNode {
                 transportKind: transportKind
             )
             await sess.setOnTrustPending(onTrustPending)
+            await sess.setOnBootstrapProgress(onBootstrapProgress)
             return try await withTaskCancellationHandler {
                 _ = try await sess.start(
                     localHello: hello,

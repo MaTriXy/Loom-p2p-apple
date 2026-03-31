@@ -21,6 +21,9 @@ public protocol LoomSessionProtocol: Sendable {
     /// Creates an observation stream for lifecycle state transitions.
     func makeStateObserver() async -> AsyncStream<LoomAuthenticatedSessionState>
 
+    /// Creates an observation stream for bootstrap progress before the session becomes ready.
+    func makeBootstrapProgressObserver() async -> AsyncStream<LoomAuthenticatedSessionBootstrapProgress>
+
     /// Opens a logical bidirectional stream on the session.
     func openStream(label: String?) async throws -> LoomMultiplexedStream
 

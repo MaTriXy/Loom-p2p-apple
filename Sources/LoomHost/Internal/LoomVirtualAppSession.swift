@@ -18,9 +18,11 @@ package actor LoomVirtualAppSession: LoomSessionProtocol {
     private let closeHandler: @Sendable (UUID, UInt16) async throws -> Void
     private let cancelHandler: @Sendable (UUID) async -> Void
     private let stateObservers = LoomAsyncBroadcaster<LoomAuthenticatedSessionState>()
+    private let bootstrapProgressObservers = LoomAsyncBroadcaster<LoomAuthenticatedSessionBootstrapProgress>()
     private let incomingStreamObservers = LoomAsyncBroadcaster<LoomMultiplexedStream>()
 
     private var state: LoomAuthenticatedSessionState = .ready
+    private var bootstrapProgress = LoomAuthenticatedSessionBootstrapProgress(phase: .ready)
     private var streams: [UInt16: LoomMultiplexedStream] = [:]
     private var nextOutgoingStreamID: UInt16 = 1
 
@@ -44,6 +46,7 @@ package actor LoomVirtualAppSession: LoomSessionProtocol {
 
     deinit {
         stateObservers.finish()
+        bootstrapProgressObservers.finish()
         incomingStreamObservers.finish()
     }
 
@@ -53,6 +56,10 @@ package actor LoomVirtualAppSession: LoomSessionProtocol {
 
     package func makeStateObserver() -> AsyncStream<LoomAuthenticatedSessionState> {
         stateObservers.makeStream(initialValue: state)
+    }
+
+    package func makeBootstrapProgressObserver() -> AsyncStream<LoomAuthenticatedSessionBootstrapProgress> {
+        bootstrapProgressObservers.makeStream(initialValue: bootstrapProgress)
     }
 
     package func openStream(label: String?) async throws -> LoomMultiplexedStream {
