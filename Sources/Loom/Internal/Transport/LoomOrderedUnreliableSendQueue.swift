@@ -10,6 +10,11 @@ import Foundation
 import Network
 
 package final class LoomOrderedUnreliableSendQueue: @unchecked Sendable {
+    package struct Limits: Sendable, Equatable {
+        let maxOutstandingPackets: Int
+        let maxOutstandingBytes: Int
+    }
+
     private struct PendingSend {
         let data: Data
         let onComplete: @Sendable (NWError?) -> Void
@@ -17,6 +22,8 @@ package final class LoomOrderedUnreliableSendQueue: @unchecked Sendable {
 
     package static let defaultMaxOutstandingPackets = 1024
     package static let defaultMaxOutstandingBytes = 2 * 1024 * 1024
+    package static let throughputProbeMaxOutstandingPackets = 262_144
+    package static let throughputProbeMaxOutstandingBytes = 512 * 1024 * 1024
 
     private let queue: DispatchQueue
     private let sendOperation: @Sendable (Data, @escaping @Sendable (NWError?) -> Void) -> Void
@@ -26,6 +33,14 @@ package final class LoomOrderedUnreliableSendQueue: @unchecked Sendable {
     private var pendingSends: [PendingSend] = []
     private var outstandingPackets = 0
     private var outstandingBytes = 0
+
+    package static func limits(for profile: LoomQueuedUnreliableSendProfile) -> Limits {
+        let recommendedLimits = profile.recommendedLimits
+        return Limits(
+            maxOutstandingPackets: recommendedLimits.maxOutstandingPackets,
+            maxOutstandingBytes: recommendedLimits.maxOutstandingBytes
+        )
+    }
 
     package init(
         connection: NWConnection,

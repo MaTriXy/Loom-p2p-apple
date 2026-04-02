@@ -144,7 +144,7 @@ package actor LoomVirtualAppSession: LoomSessionProtocol {
             unreliableSendHandler: { [connectionID, sendHandler] data in
                 try await sendHandler(connectionID, id, data)
             },
-            queuedUnreliableSendHandler: { [connectionID, sendHandler] data, onComplete in
+            queuedUnreliableSendHandler: { [connectionID, sendHandler] data, _, onComplete in
                 do {
                     try await sendHandler(connectionID, id, data)
                     onComplete(nil)
@@ -152,6 +152,7 @@ package actor LoomVirtualAppSession: LoomSessionProtocol {
                     onComplete(error)
                 }
             },
+            queuedUnreliableResetHandler: { _ in },
             closeHandler: { [connectionID, closeHandler] in
                 try await closeHandler(connectionID, id)
             }

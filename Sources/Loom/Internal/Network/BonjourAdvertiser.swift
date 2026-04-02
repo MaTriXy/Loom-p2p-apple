@@ -53,15 +53,7 @@ actor BonjourAdvertiser {
         // and local network permissions. Actual sessions use the separate UDP listener.
         // TODO: Investigate using a UDP Bonjour listener once NWConnection supports
         // resolving _udp service endpoints (rdar://FB...).
-        let parameters = NWParameters.tcp
-        parameters.serviceClass = .interactiveVideo
-        parameters.includePeerToPeer = enablePeerToPeer
-
-        if let tcpOptions = parameters.defaultProtocolStack.transportProtocol as? NWProtocolTCP.Options {
-            tcpOptions.noDelay = true
-            tcpOptions.enableKeepalive = true
-            tcpOptions.keepaliveInterval = 5
-        }
+        let parameters = Self.makeAdvertiserParameters(enablePeerToPeer: enablePeerToPeer)
 
         let actualPort: NWEndpoint.Port = port == 0 ? .any : NWEndpoint.Port(rawValue: port)!
         parameters.allowLocalEndpointReuse = true
@@ -108,6 +100,20 @@ actor BonjourAdvertiser {
 
             listener.start(queue: .global(qos: .userInteractive))
         }
+    }
+
+    package static func makeAdvertiserParameters(enablePeerToPeer: Bool) -> NWParameters {
+        let parameters = NWParameters.tcp
+        parameters.serviceClass = .interactiveVideo
+        parameters.includePeerToPeer = enablePeerToPeer
+
+        if let tcpOptions = parameters.defaultProtocolStack.transportProtocol as? NWProtocolTCP.Options {
+            tcpOptions.noDelay = true
+            tcpOptions.enableKeepalive = true
+            tcpOptions.keepaliveInterval = 5
+        }
+
+        return parameters
     }
 
     private func setAdvertising(_ value: Bool) {

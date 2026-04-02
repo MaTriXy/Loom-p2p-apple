@@ -62,8 +62,7 @@ public final class LoomDiscovery {
 
         LoomLogger.discovery("Starting discovery for \(serviceType)")
 
-        let parameters = NWParameters()
-        parameters.includePeerToPeer = enablePeerToPeer
+        let parameters = Self.makeBrowserParameters(enablePeerToPeer: enablePeerToPeer)
 
         let txtRecordMonitor = BonjourTXTRecordMonitor(
             serviceType: serviceType,
@@ -99,6 +98,12 @@ public final class LoomDiscovery {
 
         browser?.start(queue: .main)
         isSearching = true
+    }
+
+    nonisolated package static func makeBrowserParameters(enablePeerToPeer: Bool) -> NWParameters {
+        let parameters = NWParameters()
+        parameters.includePeerToPeer = enablePeerToPeer
+        return parameters
     }
 
     /// Stop discovery.

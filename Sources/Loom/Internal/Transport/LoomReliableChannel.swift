@@ -16,7 +16,7 @@ import Network
 /// for messages exceeding a single datagram.
 package actor LoomReliableChannel: LoomSessionTransport {
     private let connection: NWConnection
-    private let queuedUnreliableSender: LoomOrderedUnreliableSendQueue
+    private var queuedUnreliableSenders: [LoomQueuedUnreliableSendProfile: LoomOrderedUnreliableSendQueue] = [:]
     package let receiveSemantics: LoomSessionReceiveSemantics = .independentReliableAndUnreliable
 
     // MARK: - Send State
@@ -74,10 +74,6 @@ package actor LoomReliableChannel: LoomSessionTransport {
 
     package init(connection: NWConnection) {
         self.connection = connection
-        queuedUnreliableSender = LoomOrderedUnreliableSendQueue(
-            connection: connection,
-            queue: sendQueue
-        )
         let (stream, continuation) = AsyncStream.makeStream(of: Data.self)
         deliveryStream = stream
         deliveryContinuation = continuation
@@ -232,7 +228,11 @@ package actor LoomReliableChannel: LoomSessionTransport {
         try await sendRaw(header.serialize() + data)
     }
 
-    package func sendUnreliableQueued(_ data: Data, onComplete: @escaping @Sendable (Error?) -> Void) async {
+    package func sendUnreliableQueued(
+        _ data: Data,
+        profile: LoomQueuedUnreliableSendProfile,
+        onComplete: @escaping @Sendable (Error?) -> Void
+    ) async {
         guard !isClosed else {
             onComplete(LoomError.protocolError("Reliable channel is closed."))
             return
@@ -249,13 +249,19 @@ package actor LoomReliableChannel: LoomSessionTransport {
         )
         clearNeedsAck()
         let packet = header.serialize() + data
-        queuedUnreliableSender.enqueue(packet) { error in
+        queuedUnreliableSender(for: profile).enqueue(packet) { error in
             if let error {
                 onComplete(LoomError.connectionFailed(LoomConnectionFailure.classify(error)))
             } else {
                 onComplete(nil)
             }
         }
+    }
+
+    package func resetQueuedUnreliableSends(
+        profile: LoomQueuedUnreliableSendProfile
+    ) async {
+        queuedUnreliableSenders.removeValue(forKey: profile)?.close()
     }
 
     package func receiveUnreliable(maxBytes: Int) async throws -> Data {
@@ -276,13 +282,17 @@ package actor LoomReliableChannel: LoomSessionTransport {
     }
 
     package func cancelPendingUnreliableSends() async {
-        queuedUnreliableSender.close()
+        for sender in queuedUnreliableSenders.values {
+            sender.close()
+        }
     }
 
     package func close(with failure: LoomConnectionFailure? = nil) {
         guard !isClosed else { return }
         isClosed = true
-        queuedUnreliableSender.close()
+        for sender in queuedUnreliableSenders.values {
+            sender.close()
+        }
         if let failure {
             terminalFailure = failure
         } else if terminalFailure == nil {
@@ -296,6 +306,27 @@ package actor LoomReliableChannel: LoomSessionTransport {
         unreliableDeliveryContinuation?.finish()
         unreliableDeliveryContinuation = nil
         connection.cancel()
+    }
+
+    private func queuedUnreliableSender(
+        for profile: LoomQueuedUnreliableSendProfile
+    ) -> LoomOrderedUnreliableSendQueue {
+        if let existing = queuedUnreliableSenders[profile] {
+            return existing
+        }
+
+        let limits = LoomOrderedUnreliableSendQueue.limits(for: profile)
+        let sender = LoomOrderedUnreliableSendQueue(
+            connection: connection,
+            queue: DispatchQueue(
+                label: "loom.reliable.unreliable.send.\(profile.rawValue)",
+                qos: .userInteractive
+            ),
+            maxOutstandingPackets: limits.maxOutstandingPackets,
+            maxOutstandingBytes: limits.maxOutstandingBytes
+        )
+        queuedUnreliableSenders[profile] = sender
+        return sender
     }
 
     // MARK: - Sequence Management

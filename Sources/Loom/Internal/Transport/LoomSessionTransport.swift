@@ -41,7 +41,17 @@ package protocol LoomSessionTransport: Sendable {
     /// The method returns after the transport has accepted the payload for send
     /// scheduling. Completion runs later when Network.framework either accepts
     /// or rejects the underlying send operation.
-    func sendUnreliableQueued(_ data: Data, onComplete: @escaping @Sendable (Error?) -> Void) async
+    func sendUnreliableQueued(
+        _ data: Data,
+        profile: LoomQueuedUnreliableSendProfile,
+        onComplete: @escaping @Sendable (Error?) -> Void
+    ) async
+
+    /// Cancel queued unreliable sends for one profile without disturbing the
+    /// queues used by other traffic classes.
+    func resetQueuedUnreliableSends(
+        profile: LoomQueuedUnreliableSendProfile
+    ) async
 
     /// Receive the next unreliable message.
     func receiveUnreliable(maxBytes: Int) async throws -> Data

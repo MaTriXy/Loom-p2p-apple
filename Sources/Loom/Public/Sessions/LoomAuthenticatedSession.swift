@@ -43,6 +43,53 @@ public struct LoomAuthenticatedSessionContext: Sendable, Codable, Equatable {
     }
 }
 
+/// Queue profile for ordered unreliable sends on a multiplexed Loom stream.
+///
+/// Use ``interactiveMedia`` for latency-sensitive media where small transport
+/// buffers help prevent stale packets from accumulating. Use
+/// ``throughputProbe`` when you need to intentionally overdrive a path and
+/// observe where loss begins, such as an explicit network-capacity test.
+public enum LoomQueuedUnreliableSendProfile: String, Sendable, Codable, CaseIterable {
+    /// Keeps the underlying ordered unreliable queue shallow to favor latency.
+    case interactiveMedia
+    /// Allows a much deeper queue so throughput probes can saturate fast paths.
+    case throughputProbe
+
+    /// Recommended queue limits for this profile.
+    ///
+    /// Products that keep their own enqueue budget in front of Loom should use
+    /// these values so app-level pacing and Loom's internal queue depth stay in
+    /// sync for the selected send profile.
+    public var recommendedLimits: LoomQueuedUnreliableSendLimits {
+        switch self {
+        case .interactiveMedia:
+            LoomQueuedUnreliableSendLimits(
+                maxOutstandingPackets: 1024,
+                maxOutstandingBytes: 2 * 1024 * 1024
+            )
+        case .throughputProbe:
+            LoomQueuedUnreliableSendLimits(
+                maxOutstandingPackets: 262_144,
+                maxOutstandingBytes: 512 * 1024 * 1024
+            )
+        }
+    }
+}
+
+/// Recommended queue window for a ``LoomQueuedUnreliableSendProfile``.
+public struct LoomQueuedUnreliableSendLimits: Sendable, Equatable, Codable {
+    public let maxOutstandingPackets: Int
+    public let maxOutstandingBytes: Int
+
+    public init(
+        maxOutstandingPackets: Int,
+        maxOutstandingBytes: Int
+    ) {
+        self.maxOutstandingPackets = maxOutstandingPackets
+        self.maxOutstandingBytes = maxOutstandingBytes
+    }
+}
+
 /// A logical bidirectional stream multiplexed over an authenticated Loom session.
 public final class LoomMultiplexedStream: @unchecked Sendable, Hashable {
     public let id: UInt16
@@ -53,7 +100,10 @@ public final class LoomMultiplexedStream: @unchecked Sendable, Hashable {
     private var continuation: AsyncStream<Data>.Continuation?
     private let sendHandler: @Sendable (Data) async throws -> Void
     private let unreliableSendHandler: @Sendable (Data) async throws -> Void
-    private let queuedUnreliableSendHandler: @Sendable (Data, @escaping @Sendable (Error?) -> Void) async -> Void
+    private let queuedUnreliableSendHandler:
+        @Sendable (Data, LoomQueuedUnreliableSendProfile, @escaping @Sendable (Error?) -> Void) async -> Void
+    private let queuedUnreliableResetHandler:
+        @Sendable (LoomQueuedUnreliableSendProfile) async -> Void
     private let closeHandler: @Sendable () async throws -> Void
     private let queuedUnreliableSubmitter = LoomOrderedAsyncSubmitter()
 
@@ -62,7 +112,10 @@ public final class LoomMultiplexedStream: @unchecked Sendable, Hashable {
         label: String?,
         sendHandler: @escaping @Sendable (Data) async throws -> Void,
         unreliableSendHandler: @escaping @Sendable (Data) async throws -> Void,
-        queuedUnreliableSendHandler: @escaping @Sendable (Data, @escaping @Sendable (Error?) -> Void) async -> Void,
+        queuedUnreliableSendHandler:
+            @escaping @Sendable (Data, LoomQueuedUnreliableSendProfile, @escaping @Sendable (Error?) -> Void) async -> Void,
+        queuedUnreliableResetHandler:
+            @escaping @Sendable (LoomQueuedUnreliableSendProfile) async -> Void,
         closeHandler: @escaping @Sendable () async throws -> Void
     ) {
         self.id = id
@@ -70,6 +123,7 @@ public final class LoomMultiplexedStream: @unchecked Sendable, Hashable {
         self.sendHandler = sendHandler
         self.unreliableSendHandler = unreliableSendHandler
         self.queuedUnreliableSendHandler = queuedUnreliableSendHandler
+        self.queuedUnreliableResetHandler = queuedUnreliableResetHandler
         self.closeHandler = closeHandler
         let (stream, continuation) = AsyncStream.makeStream(of: Data.self)
         incomingBytes = stream
@@ -90,12 +144,13 @@ public final class LoomMultiplexedStream: @unchecked Sendable, Hashable {
     /// Completion runs later on transport acceptance or failure.
     public func sendUnreliableQueued(
         _ data: Data,
+        profile: LoomQueuedUnreliableSendProfile = .interactiveMedia,
         onComplete: @escaping @Sendable (Error?) -> Void = { _ in }
     ) {
         queuedUnreliableSubmitter.enqueue(
-            operation: { [queuedUnreliableSendHandler] markQueued in
+            operation: { [queuedUnreliableSendHandler, profile] markQueued in
                 Task {
-                    await queuedUnreliableSendHandler(data, onComplete)
+                    await queuedUnreliableSendHandler(data, profile, onComplete)
                     markQueued()
                 }
             },
@@ -107,6 +162,16 @@ public final class LoomMultiplexedStream: @unchecked Sendable, Hashable {
                 )
             }
         )
+    }
+
+    /// Cancels queued unreliable sends for one profile without closing the stream.
+    ///
+    /// This is intended for explicit throughput probes that want to discard
+    /// stale queued traffic after crossing an overload boundary.
+    public func resetQueuedUnreliableSends(
+        profile: LoomQueuedUnreliableSendProfile
+    ) async {
+        await queuedUnreliableResetHandler(profile)
     }
 
     public func close() async throws {
@@ -624,14 +689,22 @@ public actor LoomAuthenticatedSession: LoomSessionProtocol {
                 }
                 try await self.sendEnvelope(envelopeForData(data), reliable: false)
             },
-            queuedUnreliableSendHandler: { [weak self] data, onComplete in
+            queuedUnreliableSendHandler: { [weak self] data, profile, onComplete in
                 guard let self else {
                     onComplete(
                         LoomError.protocolError("Authenticated Loom session no longer exists.")
                     )
                     return
                 }
-                await self.sendEnvelopeQueued(envelopeForData(data), onComplete: onComplete)
+                await self.sendEnvelopeQueued(
+                    envelopeForData(data),
+                    profile: profile,
+                    onComplete: onComplete
+                )
+            },
+            queuedUnreliableResetHandler: { [weak self] profile in
+                guard let self else { return }
+                await self.transport.resetQueuedUnreliableSends(profile: profile)
             },
             closeHandler: { [weak self] in
                 guard let self else {
@@ -669,11 +742,16 @@ public actor LoomAuthenticatedSession: LoomSessionProtocol {
 
     private func sendEnvelopeQueued(
         _ envelope: LoomSessionStreamEnvelope,
+        profile: LoomQueuedUnreliableSendProfile,
         onComplete: @escaping @Sendable (Error?) -> Void
     ) async {
         do {
             let wireFrame = try encodeWireFrame(for: envelope)
-            await transport.sendUnreliableQueued(wireFrame, onComplete: onComplete)
+            await transport.sendUnreliableQueued(
+                wireFrame,
+                profile: profile,
+                onComplete: onComplete
+            )
         } catch {
             onComplete(error)
         }

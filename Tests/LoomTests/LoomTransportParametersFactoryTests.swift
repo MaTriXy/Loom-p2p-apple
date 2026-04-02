@@ -50,4 +50,16 @@ struct LoomTransportParametersFactoryTests {
         #expect(parameters.includePeerToPeer == true)
         #expect(parameters.requiredInterfaceType == .wiredEthernet)
     }
+
+    @Test("Bonjour browser parameters disable peer-to-peer when requested")
+    func bonjourBrowserParametersDisablePeerToPeer() {
+        let parameters = LoomDiscovery.makeBrowserParameters(enablePeerToPeer: false)
+        #expect(parameters.includePeerToPeer == false)
+    }
+
+    @Test("Bonjour advertiser parameters disable peer-to-peer when requested")
+    func bonjourAdvertiserParametersDisablePeerToPeer() {
+        let parameters = BonjourAdvertiser.makeAdvertiserParameters(enablePeerToPeer: false)
+        #expect(parameters.includePeerToPeer == false)
+    }
 }

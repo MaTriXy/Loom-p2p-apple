@@ -28,7 +28,7 @@ Loom owns the peer relationship and connectivity infrastructure:
 
 Your app still owns payload schemas, user experience, and product policy.
 
-Authenticated Loom sessions also expose transport-facing metadata that higher-level products can observe without reaching under the session boundary: a stable session identifier, explicit bootstrap progress phases before the session becomes ready, the current remote endpoint, async snapshots of path changes on the underlying connection, and queued unreliable stream sends for media-style traffic that preserve submission order without waiting on each Network.framework completion before returning.
+Authenticated Loom sessions also expose transport-facing metadata that higher-level products can observe without reaching under the session boundary: a stable session identifier, explicit bootstrap progress phases before the session becomes ready, the current remote endpoint, async snapshots of path changes on the underlying connection, and queued unreliable stream sends for media-style traffic that preserve submission order without waiting on each Network.framework completion before returning. Ordered unreliable sends support queue profiles so latency-sensitive media can keep shallow buffers while explicit throughput probes can request deeper transport queues to find the true loss point of a path. Higher layers can also reset one queue profile without closing the stream, which lets explicit throughput probes discard stale queued traffic after they hit an overload boundary.
 
 ## Topics
 

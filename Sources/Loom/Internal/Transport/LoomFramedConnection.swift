@@ -11,16 +11,12 @@ import Dispatch
 
 package actor LoomFramedConnection: LoomSessionTransport {
     private let connection: NWConnection
-    private let queuedUnreliableSender: LoomOrderedUnreliableSendQueue
+    private var queuedUnreliableSenders: [LoomQueuedUnreliableSendProfile: LoomOrderedUnreliableSendQueue] = [:]
     private var receiveBuffer = Data()
     package let receiveSemantics: LoomSessionReceiveSemantics = .singleLane
 
     package init(connection: NWConnection) {
         self.connection = connection
-        queuedUnreliableSender = LoomOrderedUnreliableSendQueue(
-            connection: connection,
-            queue: DispatchQueue(label: "loom.framed.unreliable.send", qos: .userInteractive)
-        )
     }
 
     package func sendMessage(_ data: Data) async throws {
@@ -35,9 +31,13 @@ package actor LoomFramedConnection: LoomSessionTransport {
         try await sendFrame(data)
     }
 
-    package func sendUnreliableQueued(_ data: Data, onComplete: @escaping @Sendable (Error?) -> Void) async {
+    package func sendUnreliableQueued(
+        _ data: Data,
+        profile: LoomQueuedUnreliableSendProfile,
+        onComplete: @escaping @Sendable (Error?) -> Void
+    ) async {
         let frame = framedData(for: data)
-        queuedUnreliableSender.enqueue(frame) { error in
+        queuedUnreliableSender(for: profile).enqueue(frame) { error in
             if let error {
                 onComplete(LoomError.connectionFailed(LoomConnectionFailure.classify(error)))
             } else {
@@ -46,12 +46,41 @@ package actor LoomFramedConnection: LoomSessionTransport {
         }
     }
 
+    package func resetQueuedUnreliableSends(
+        profile: LoomQueuedUnreliableSendProfile
+    ) async {
+        queuedUnreliableSenders.removeValue(forKey: profile)?.close()
+    }
+
     package func receiveUnreliable(maxBytes: Int) async throws -> Data {
         try await readFrame(maxBytes: maxBytes)
     }
 
     package func cancelPendingUnreliableSends() async {
-        queuedUnreliableSender.close()
+        for sender in queuedUnreliableSenders.values {
+            sender.close()
+        }
+    }
+
+    private func queuedUnreliableSender(
+        for profile: LoomQueuedUnreliableSendProfile
+    ) -> LoomOrderedUnreliableSendQueue {
+        if let existing = queuedUnreliableSenders[profile] {
+            return existing
+        }
+
+        let limits = LoomOrderedUnreliableSendQueue.limits(for: profile)
+        let sender = LoomOrderedUnreliableSendQueue(
+            connection: connection,
+            queue: DispatchQueue(
+                label: "loom.framed.unreliable.send.\(profile.rawValue)",
+                qos: .userInteractive
+            ),
+            maxOutstandingPackets: limits.maxOutstandingPackets,
+            maxOutstandingBytes: limits.maxOutstandingBytes
+        )
+        queuedUnreliableSenders[profile] = sender
+        return sender
     }
 
     package func startAndAwaitReady(queue: DispatchQueue) async throws {
