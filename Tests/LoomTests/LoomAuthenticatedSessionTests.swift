@@ -90,6 +90,22 @@ struct LoomAuthenticatedSessionTests {
     }
 
     @MainActor
+    @Test("Authenticated sessions fail closed when trust requires approval")
+    func requiresApprovalTrustOutcomeFailsClosed() async throws {
+        try await assertTrustOutcomeFailsClosed(
+            LoomTrustEvaluation(decision: .requiresApproval, shouldShowAutoTrustNotice: false)
+        )
+    }
+
+    @MainActor
+    @Test("Authenticated sessions fail closed when trust is unavailable")
+    func unavailableTrustOutcomeFailsClosed() async throws {
+        try await assertTrustOutcomeFailsClosed(
+            LoomTrustEvaluation(decision: .unavailable("iCloud not available"), shouldShowAutoTrustNotice: false)
+        )
+    }
+
+    @MainActor
     @Test("Encrypted authenticated sessions round-trip multiplexed stream payloads")
     func encryptedSessionRoundTrip() async throws {
         let pair = try await makeLoopbackPair()
@@ -105,7 +121,8 @@ struct LoomAuthenticatedSessionTests {
         )
         async let serverContext = pair.server.start(
             localHello: pair.serverHello,
-            identityManager: pair.serverIdentityManager
+            identityManager: pair.serverIdentityManager,
+            trustProvider: pair.serverTrustProvider
         )
         _ = try await (clientContext, serverContext)
 
@@ -156,7 +173,8 @@ struct LoomAuthenticatedSessionTests {
         )
         async let serverContext = pair.server.start(
             localHello: pair.serverHello,
-            identityManager: pair.serverIdentityManager
+            identityManager: pair.serverIdentityManager,
+            trustProvider: pair.serverTrustProvider
         )
         _ = try await (clientContext, serverContext)
 
@@ -181,7 +199,8 @@ struct LoomAuthenticatedSessionTests {
         )
         async let serverContext = pair.server.start(
             localHello: pair.serverHello,
-            identityManager: pair.serverIdentityManager
+            identityManager: pair.serverIdentityManager,
+            trustProvider: pair.serverTrustProvider
         )
         _ = try await (clientContext, serverContext)
 
@@ -242,7 +261,8 @@ struct LoomAuthenticatedSessionTests {
         )
         async let serverContext = pair.server.start(
             localHello: pair.serverHello,
-            identityManager: pair.serverIdentityManager
+            identityManager: pair.serverIdentityManager,
+            trustProvider: pair.serverTrustProvider
         )
         _ = try await (clientContext, serverContext)
 
@@ -482,7 +502,8 @@ struct LoomAuthenticatedSessionTests {
         )
         async let serverContext = pair.server.start(
             localHello: pair.serverHello,
-            identityManager: pair.serverIdentityManager
+            identityManager: pair.serverIdentityManager,
+            trustProvider: pair.serverTrustProvider
         )
         _ = try await (clientContext, serverContext)
 
@@ -517,7 +538,8 @@ struct LoomAuthenticatedSessionTests {
         )
         async let serverContext = pair.server.start(
             localHello: pair.serverHello,
-            identityManager: pair.serverIdentityManager
+            identityManager: pair.serverIdentityManager,
+            trustProvider: pair.serverTrustProvider
         )
         _ = try await (clientContext, serverContext)
 
@@ -550,7 +572,8 @@ struct LoomAuthenticatedSessionTests {
         )
         async let serverContext = pair.server.start(
             localHello: pair.serverHello,
-            identityManager: pair.serverIdentityManager
+            identityManager: pair.serverIdentityManager,
+            trustProvider: pair.serverTrustProvider
         )
         _ = try await (clientContext, serverContext)
 
@@ -590,7 +613,8 @@ struct LoomAuthenticatedSessionTests {
         )
         async let serverContext = pair.server.start(
             localHello: pair.serverHello,
-            identityManager: pair.serverIdentityManager
+            identityManager: pair.serverIdentityManager,
+            trustProvider: pair.serverTrustProvider
         )
         _ = try await (clientContext, serverContext)
 
@@ -605,6 +629,7 @@ private struct LoopbackSessionPair {
     let listener: NWListener
     let clientIdentityManager: LoomIdentityManager
     let serverIdentityManager: LoomIdentityManager
+    let serverTrustProvider: AlwaysTrustProvider
     let clientHello: LoomSessionHelloRequest
     let serverHello: LoomSessionHelloRequest
     let client: LoomAuthenticatedSession
@@ -686,11 +711,13 @@ private func makeLoopbackPair(
         advertisement: LoomPeerAdvertisement(deviceType: .mac),
         supportedFeatures: serverFeatures
     )
+    let serverTrustProvider = AlwaysTrustProvider()
 
     return LoopbackSessionPair(
         listener: listener,
         clientIdentityManager: clientIdentityManager,
         serverIdentityManager: serverIdentityManager,
+        serverTrustProvider: serverTrustProvider,
         clientHello: clientHello,
         serverHello: serverHello,
         client: client,
@@ -757,6 +784,7 @@ private func makeStartedUDPLoopbackPair(
         advertisement: LoomPeerAdvertisement(deviceType: .mac),
         supportedFeatures: serverFeatures
     )
+    let serverTrustProvider = AlwaysTrustProvider()
 
     let clientStartTask = Task {
         try await client.start(
@@ -774,7 +802,8 @@ private func makeStartedUDPLoopbackPair(
     let serverStartTask = Task {
         try await server.start(
             localHello: serverHello,
-            identityManager: serverIdentityManager
+            identityManager: serverIdentityManager,
+            trustProvider: serverTrustProvider
         )
     }
 
@@ -784,6 +813,7 @@ private func makeStartedUDPLoopbackPair(
         listener: listener,
         clientIdentityManager: clientIdentityManager,
         serverIdentityManager: serverIdentityManager,
+        serverTrustProvider: serverTrustProvider,
         clientHello: clientHello,
         serverHello: serverHello,
         client: client,
@@ -796,6 +826,52 @@ private func firstPayload(from stream: LoomMultiplexedStream) async -> Data? {
         return payload
     }
     return nil
+}
+
+@MainActor
+private func assertTrustOutcomeFailsClosed(
+    _ outcome: LoomTrustEvaluation
+) async throws {
+    let pair = try await makeLoopbackPair()
+    defer {
+        Task {
+            await pair.stop()
+        }
+    }
+
+    let provider = FixedTrustProvider(outcome: outcome)
+    let clientResult = Task {
+        try await pair.client.start(
+            localHello: pair.clientHello,
+            identityManager: pair.clientIdentityManager
+        )
+    }
+    let serverResult = Task {
+        try await pair.server.start(
+            localHello: pair.serverHello,
+            identityManager: pair.serverIdentityManager,
+            trustProvider: provider
+        )
+    }
+
+    await assertAuthenticationFailed(clientResult)
+    await assertAuthenticationFailed(serverResult)
+    #expect(provider.evaluatedPeerCount == 1)
+    #expect(await pair.client.state == .failed("denied"))
+    #expect(await pair.server.state == .failed("denied"))
+}
+
+private func assertAuthenticationFailed(
+    _ task: Task<LoomAuthenticatedSessionContext, Error>
+) async {
+    do {
+        _ = try await task.value
+        Issue.record("Expected authenticated session start to fail closed.")
+    } catch LoomError.authenticationFailed {
+        return
+    } catch {
+        Issue.record("Expected LoomError.authenticationFailed, got \(error.localizedDescription).")
+    }
 }
 
 private func collectPayloads(
@@ -882,4 +958,43 @@ private actor AsyncBox<Value: Sendable> {
         }
         return value
     }
+}
+
+@MainActor
+private final class FixedTrustProvider: LoomTrustProvider {
+    let outcome: LoomTrustEvaluation
+    private(set) var evaluatedPeerCount = 0
+
+    init(outcome: LoomTrustEvaluation) {
+        self.outcome = outcome
+    }
+
+    func evaluateTrust(for peer: LoomPeerIdentity) async -> LoomTrustDecision {
+        evaluatedPeerCount += 1
+        return outcome.decision
+    }
+
+    func evaluateTrustOutcome(for peer: LoomPeerIdentity) async -> LoomTrustEvaluation {
+        evaluatedPeerCount += 1
+        return outcome
+    }
+
+    func grantTrust(to peer: LoomPeerIdentity) async throws {}
+
+    func revokeTrust(for deviceID: UUID) async throws {}
+}
+
+@MainActor
+private final class AlwaysTrustProvider: LoomTrustProvider {
+    func evaluateTrust(for peer: LoomPeerIdentity) async -> LoomTrustDecision {
+        .trusted
+    }
+
+    func evaluateTrustOutcome(for peer: LoomPeerIdentity) async -> LoomTrustEvaluation {
+        LoomTrustEvaluation(decision: .trusted, shouldShowAutoTrustNotice: false)
+    }
+
+    func grantTrust(to peer: LoomPeerIdentity) async throws {}
+
+    func revokeTrust(for deviceID: UUID) async throws {}
 }

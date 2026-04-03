@@ -419,7 +419,7 @@ public actor LoomAuthenticatedSession: LoomSessionProtocol {
             } else {
                 trustEvaluation = try await receiveHostTrustStatus()
             }
-            if trustEvaluation.decision == .denied {
+            if trustEvaluation.decision != .trusted {
                 updateState(.failed("denied"))
                 rawSession.cancel()
                 throw LoomError.authenticationFailed
@@ -868,7 +868,7 @@ public actor LoomAuthenticatedSession: LoomSessionProtocol {
         }
 
         let finalStatus: LoomHandshakeTrustStatus =
-            evaluation.decision == .denied ? .denied : .trusted
+            evaluation.decision == .trusted ? .trusted : .denied
         try await sendTrustStatus(finalStatus)
         return evaluation
     }
