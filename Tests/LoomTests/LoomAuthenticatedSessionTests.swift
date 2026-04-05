@@ -298,6 +298,47 @@ struct LoomAuthenticatedSessionTests {
     }
 
     @MainActor
+    @Test("TCP authenticated sessions ignore late queued payloads after a stream closes")
+    func tcpSessionIgnoresLateQueuedPayloadsAfterClose() async throws {
+        let pair = try await makeLoopbackPair()
+        defer {
+            Task {
+                await pair.stop()
+            }
+        }
+
+        async let clientContext = pair.client.start(
+            localHello: pair.clientHello,
+            identityManager: pair.clientIdentityManager
+        )
+        async let serverContext = pair.server.start(
+            localHello: pair.serverHello,
+            identityManager: pair.serverIdentityManager,
+            trustProvider: pair.serverTrustProvider
+        )
+        _ = try await (clientContext, serverContext)
+
+        let incomingStreamTask = Task<LoomMultiplexedStream?, Never> {
+            for await stream in pair.server.incomingStreams {
+                return stream
+            }
+            return nil
+        }
+
+        let mediaStream = try await pair.client.openStream(label: "video/late-after-close")
+        _ = try #require(await incomingStreamTask.value)
+
+        try await pair.client.injectCloseForTesting(streamID: mediaStream.id)
+        try await pair.client.injectReliableDataForTesting(
+            streamID: mediaStream.id,
+            payload: Data("late-after-close".utf8)
+        )
+
+        #expect(await pair.client.state == .ready)
+        #expect(await pair.server.state == .ready)
+    }
+
+    @MainActor
     @Test("UDP authenticated sessions buffer out-of-order unreliable data until open")
     func udpSessionBuffersOutOfOrderUnreliableDataUntilOpen() async throws {
         let pair = try await makeStartedUDPLoopbackPair()
@@ -369,6 +410,36 @@ struct LoomAuthenticatedSessionTests {
         #expect(await pair.client.state == .ready)
         #expect(await pair.server.state == .ready)
         try await mediaStream.close()
+    }
+
+    @MainActor
+    @Test("UDP authenticated sessions ignore late unreliable payloads after a stream closes")
+    func udpSessionIgnoresLateUnreliablePayloadsAfterClose() async throws {
+        let pair = try await makeStartedUDPLoopbackPair()
+        defer {
+            Task {
+                await pair.stop()
+            }
+        }
+
+        let incomingStreamTask = Task<LoomMultiplexedStream?, Never> {
+            for await stream in pair.server.incomingStreams {
+                return stream
+            }
+            return nil
+        }
+
+        let mediaStream = try await pair.client.openStream(label: "video/late-after-close")
+        _ = try #require(await incomingStreamTask.value)
+
+        try await pair.client.injectCloseForTesting(streamID: mediaStream.id)
+        try await pair.client.injectUnreliableDataForTesting(
+            streamID: mediaStream.id,
+            payload: Data("late-after-close".utf8)
+        )
+
+        #expect(await pair.client.state == .ready)
+        #expect(await pair.server.state == .ready)
     }
 
     @MainActor

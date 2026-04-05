@@ -289,6 +289,9 @@ public actor LoomAuthenticatedSession: LoomSessionProtocol {
     private let pendingUnopenedUnreliableDataMaxStreams = 8
     private let pendingUnopenedUnreliableDataMaxPayloadsPerStream = 768
     private let pendingUnopenedUnreliableDataMaxBytesPerStream = 2 * 1024 * 1024
+    private var recentlyClosedStreamIDs: [UInt16: CFAbsoluteTime] = [:]
+    private let recentlyClosedStreamTTL: CFAbsoluteTime = 2.0
+    private let recentlyClosedStreamMaxCount = 64
 
     public init(
         rawSession: LoomSession,
@@ -557,6 +560,13 @@ public actor LoomAuthenticatedSession: LoomSessionProtocol {
                 )
             }
             guard let stream = streams[envelope.streamID] else {
+                if recentlyClosedStreamContains(envelope.streamID) {
+                    discardPendingUnopenedUnreliablePayloads(
+                        for: envelope.streamID,
+                        reason: "late-data-after-close"
+                    )
+                    return
+                }
                 if lane == .unreliable,
                    transport.receiveSemantics == .independentReliableAndUnreliable {
                     bufferPendingUnopenedUnreliablePayload(
@@ -576,6 +586,7 @@ public actor LoomAuthenticatedSession: LoomSessionProtocol {
             guard let stream = streams.removeValue(forKey: envelope.streamID) else {
                 return
             }
+            markRecentlyClosedStream(envelope.streamID)
             stream.finishInbound()
         }
     }
@@ -670,6 +681,52 @@ public actor LoomAuthenticatedSession: LoomSessionProtocol {
         )
     }
 
+    private func markRecentlyClosedStream(_ streamID: UInt16) {
+        let now = CFAbsoluteTimeGetCurrent()
+        evictExpiredRecentlyClosedStreams(now: now)
+        recentlyClosedStreamIDs[streamID] = now
+        evictOldestRecentlyClosedStreamsIfNeeded()
+    }
+
+    private func recentlyClosedStreamContains(_ streamID: UInt16) -> Bool {
+        let now = CFAbsoluteTimeGetCurrent()
+        evictExpiredRecentlyClosedStreams(now: now)
+        guard let closedAt = recentlyClosedStreamIDs[streamID] else {
+            return false
+        }
+        if now - closedAt >= recentlyClosedStreamTTL {
+            recentlyClosedStreamIDs.removeValue(forKey: streamID)
+            return false
+        }
+        return true
+    }
+
+    private func evictExpiredRecentlyClosedStreams(now: CFAbsoluteTime) {
+        guard !recentlyClosedStreamIDs.isEmpty else { return }
+
+        let expiredStreamIDs = recentlyClosedStreamIDs.compactMap { streamID, closedAt in
+            now - closedAt >= recentlyClosedStreamTTL ? streamID : nil
+        }
+        for streamID in expiredStreamIDs {
+            recentlyClosedStreamIDs.removeValue(forKey: streamID)
+        }
+    }
+
+    private func evictOldestRecentlyClosedStreamsIfNeeded() {
+        let overflow = recentlyClosedStreamIDs.count - recentlyClosedStreamMaxCount
+        guard overflow > 0 else { return }
+
+        let oldestStreamIDs = recentlyClosedStreamIDs
+            .sorted { lhs, rhs in
+                lhs.value < rhs.value
+            }
+            .prefix(overflow)
+            .map(\.key)
+        for streamID in oldestStreamIDs {
+            recentlyClosedStreamIDs.removeValue(forKey: streamID)
+        }
+    }
+
     private func makeStream(id: UInt16, label: String?) -> LoomMultiplexedStream {
         let envelopeForData: @Sendable (Data) -> LoomSessionStreamEnvelope = { data in
             LoomSessionStreamEnvelope(kind: .data, streamID: id, label: nil, payload: data)
@@ -724,7 +781,10 @@ public actor LoomAuthenticatedSession: LoomSessionProtocol {
     }
 
     private func removeStream(id: UInt16) {
-        streams.removeValue(forKey: id)
+        guard streams.removeValue(forKey: id) != nil else {
+            return
+        }
+        markRecentlyClosedStream(id)
     }
 
     private func sendEnvelope(
@@ -1009,6 +1069,7 @@ public actor LoomAuthenticatedSession: LoomSessionProtocol {
         }
         streams.removeAll(keepingCapacity: false)
         pendingUnopenedUnreliableDataByStreamID.removeAll(keepingCapacity: false)
+        recentlyClosedStreamIDs.removeAll(keepingCapacity: false)
         incomingStreamContinuation.finish()
         incomingStreamObservers.finish()
         stateObservers.finish()
@@ -1035,12 +1096,36 @@ public actor LoomAuthenticatedSession: LoomSessionProtocol {
         )
     }
 
+    package func injectReliableDataForTesting(streamID: UInt16, payload: Data) async throws {
+        try await handleEnvelope(
+            LoomSessionStreamEnvelope(
+                kind: .data,
+                streamID: streamID,
+                label: nil,
+                payload: payload
+            ),
+            lane: .reliable
+        )
+    }
+
     package func injectOpenForTesting(streamID: UInt16, label: String? = nil) async throws {
         try await handleEnvelope(
             LoomSessionStreamEnvelope(
                 kind: .open,
                 streamID: streamID,
                 label: label,
+                payload: nil
+            ),
+            lane: .reliable
+        )
+    }
+
+    package func injectCloseForTesting(streamID: UInt16) async throws {
+        try await handleEnvelope(
+            LoomSessionStreamEnvelope(
+                kind: .close,
+                streamID: streamID,
+                label: nil,
                 payload: nil
             ),
             lane: .reliable
