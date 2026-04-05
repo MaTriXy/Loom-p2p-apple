@@ -1,29 +1,21 @@
 //
-//  LoomCloudKitShareManager.swift
+//  LoomCloudKitPeerManager.swift
 //  Loom
 //
 //  Created by Ethan Lipnik on 1/28/26.
 //
-//  Manages CloudKit sharing for peer access.
+//  Manages same-account CloudKit peer registration and refresh.
 //
 
 import CloudKit
 import Foundation
 import Loom
 import Observation
-#if canImport(UIKit)
-import UIKit
-#endif
-#if canImport(AppKit)
-import AppKit
-#endif
 
-/// Manages CloudKit sharing for allowing peers to discover and access each other.
+/// Manages same-account CloudKit peer registration and refresh.
 @Observable
 @MainActor
-public final class LoomCloudKitShareManager {
-    public typealias ShareThumbnailDataProvider = @Sendable (CKRecord) -> Data?
-
+public final class LoomCloudKitPeerManager {
     private struct PeerRecordPopulationAttempt {
         let attemptedOptionalPeerMetadataWrite: Bool
         let attemptedRichPeerMetadataWrite: Bool
@@ -33,7 +25,6 @@ public final class LoomCloudKitShareManager {
     private let cloudKitManager: LoomCloudKitManager
     private let peerZoneID: CKRecordZone.ID
     private let isCloudKitAvailable: () -> Bool
-    private let shareThumbnailDataProvider: ShareThumbnailDataProvider
     private let ensureZone: (CKRecordZone) async throws -> Void
     private let queryRecords: (CKQuery, CKRecordZone.ID) async throws -> [(CKRecord.ID, Result<CKRecord, Error>)]
     private let fetchRecord: (CKRecord.ID) async throws -> CKRecord
@@ -46,17 +37,12 @@ public final class LoomCloudKitShareManager {
     private var cloudKitSchemaSupportsRichPeerMetadata = true
     private var cloudKitSchemaSupportsParticipantIdentityRecords = true
 
-    public private(set) var activeShare: CKShare?
     public private(set) var peerRecord: CKRecord?
     public private(set) var isLoading = false
     public private(set) var lastError: Error?
 
-    public init(
-        cloudKitManager: LoomCloudKitManager,
-        shareThumbnailDataProvider: @escaping ShareThumbnailDataProvider = { _ in nil }
-    ) {
+    public init(cloudKitManager: LoomCloudKitManager) {
         self.cloudKitManager = cloudKitManager
-        self.shareThumbnailDataProvider = shareThumbnailDataProvider
         isCloudKitAvailable = { cloudKitManager.isAvailable }
         peerZoneID = CKRecordZone.ID(
             zoneName: cloudKitManager.configuration.peerZoneName,
@@ -96,7 +82,6 @@ public final class LoomCloudKitShareManager {
 
     init(
         cloudKitManager: LoomCloudKitManager,
-        shareThumbnailDataProvider: @escaping ShareThumbnailDataProvider = { _ in nil },
         isCloudKitAvailable: @escaping () -> Bool = { true },
         ensureZone: @escaping (CKRecordZone) async throws -> Void,
         queryRecords: @escaping (CKQuery, CKRecordZone.ID) async throws -> [(CKRecord.ID, Result<CKRecord, Error>)],
@@ -105,7 +90,6 @@ public final class LoomCloudKitShareManager {
             async throws -> [CKRecord.ID: Result<CKRecord, Error>]
     ) {
         self.cloudKitManager = cloudKitManager
-        self.shareThumbnailDataProvider = shareThumbnailDataProvider
         self.isCloudKitAvailable = isCloudKitAvailable
         peerZoneID = CKRecordZone.ID(
             zoneName: cloudKitManager.configuration.peerZoneName,
@@ -119,7 +103,7 @@ public final class LoomCloudKitShareManager {
 
     public func setup() async {
         guard isCloudKitAvailable() else {
-            LoomLogger.cloud("ShareManager: skipping setup because CloudKit is unavailable")
+            LoomLogger.cloud("PeerManager: skipping setup because CloudKit is unavailable")
             return
         }
 
@@ -132,14 +116,13 @@ public final class LoomCloudKitShareManager {
             try await refreshState()
         } catch {
             lastError = error
-            LoomLogger.error(.cloud, error: error, message: "ShareManager setup failed: ")
+            LoomLogger.error(.cloud, error: error, message: "PeerManager setup failed: ")
         }
     }
 
     public func refresh() async {
         guard isCloudKitAvailable() else {
             peerRecord = nil
-            activeShare = nil
             lastError = nil
             return
         }
@@ -152,9 +135,8 @@ public final class LoomCloudKitShareManager {
             try await refreshState()
         } catch {
             peerRecord = nil
-            activeShare = nil
             lastError = error
-            LoomLogger.error(.cloud, error: error, message: "ShareManager refresh failed: ")
+            LoomLogger.error(.cloud, error: error, message: "PeerManager refresh failed: ")
         }
     }
 
@@ -165,7 +147,8 @@ public final class LoomCloudKitShareManager {
         identityPublicKey: Data? = nil,
         remoteAccessEnabled: Bool = false,
         signalingSessionID: String? = nil,
-        bootstrapMetadata: LoomBootstrapMetadata? = nil
+        bootstrapMetadata: LoomBootstrapMetadata? = nil,
+        overlayHints: [LoomCloudKitOverlayHint] = []
     ) async throws {
         guard isCloudKitAvailable() else {
             throw LoomCloudKitError.containerUnavailable
@@ -187,7 +170,8 @@ public final class LoomCloudKitShareManager {
                 identityPublicKey: identityPublicKey,
                 remoteAccessEnabled: remoteAccessEnabled,
                 signalingSessionID: signalingSessionID,
-                bootstrapMetadata: bootstrapMetadata
+                bootstrapMetadata: bootstrapMetadata,
+                overlayHints: overlayHints
             )
 
             do {
@@ -204,7 +188,7 @@ public final class LoomCloudKitShareManager {
             ) {
                 cloudKitSchemaSupportsBootstrapMetadata = false
                 LoomLogger.cloud(
-                    "ShareManager: schema rejected bootstrap metadata; retrying peer registration without bootstrap metadata"
+                    "PeerManager: schema rejected bootstrap metadata; retrying peer registration without bootstrap metadata"
                 )
             } catch where Self.shouldRetryRegistrationWithoutOptionalPeerMetadata(
                 error: error,
@@ -212,7 +196,7 @@ public final class LoomCloudKitShareManager {
             ) {
                 cloudKitSchemaSupportsOptionalPeerMetadata = false
                 LoomLogger.cloud(
-                    "ShareManager: schema rejected optional peer metadata; retrying with base fields only"
+                    "PeerManager: schema rejected optional peer metadata; retrying with base fields only"
                 )
             } catch where Self.shouldRetryRegistrationWithMinimalRecordFields(
                 error: error,
@@ -220,7 +204,7 @@ public final class LoomCloudKitShareManager {
             ) {
                 cloudKitSchemaSupportsRichPeerMetadata = false
                 LoomLogger.cloud(
-                    "ShareManager: schema rejected rich peer metadata; retrying with minimal legacy fields"
+                    "PeerManager: schema rejected rich peer metadata; retrying with minimal legacy fields"
                 )
             } catch {
                 lastError = error
@@ -248,8 +232,7 @@ public final class LoomCloudKitShareManager {
             if Self.isUnknownItemCloudKitError(error) {
                 cachedPeerRecordName = nil
                 peerRecord = nil
-                activeShare = nil
-                LoomLogger.cloud("ShareManager: cached peer record was deleted; clearing registration cache")
+                LoomLogger.cloud("PeerManager: cached peer record was deleted; clearing registration cache")
                 return
             }
             LoomLogger.error(.cloud, error: error, message: "Failed to update peer lastSeen: ")
@@ -271,7 +254,7 @@ public final class LoomCloudKitShareManager {
             results = try await queryRecords(query, peerZoneID)
         } catch where Self.shouldIgnoreStaleOwnPeerCleanupFailure(error) {
             LoomLogger.cloud(
-                "ShareManager: skipping stale own-peer cleanup because the peer record zone is not yet available"
+                "PeerManager: skipping stale own-peer cleanup because the peer record zone is not yet available"
             )
             return 0
         }
@@ -306,91 +289,8 @@ public final class LoomCloudKitShareManager {
         return staleRecordIDs.count
     }
 
-    public func createShare() async throws -> CKShare {
-        isLoading = true
-        defer { isLoading = false }
-        lastError = nil
-
-        do {
-            let share = try await ensureShare()
-            activeShare = share
-            return share
-        } catch {
-            lastError = error
-            throw error
-        }
-    }
-
-    public func revokeShare() async throws {
-        guard let share = activeShare else { return }
-        _ = try await modifyRecords([], [share.recordID], .changedKeys)
-        activeShare = nil
-    }
-
-    public func removeParticipant(_ participant: CKShare.Participant) async throws {
-        guard let share = activeShare else { return }
-
-        share.removeParticipant(participant)
-        let saveResults = try await modifyRecords([share], [], .changedKeys)
-        activeShare = try saveResults[share.recordID]?.get() as? CKShare ?? share
-        cloudKitManager.clearShareParticipantCache()
-    }
-
-    #if os(macOS)
-    public func presentSharingUI(from _: NSWindow) async throws {
-        guard let container = cloudKitManager.container else {
-            throw LoomCloudKitError.containerUnavailable
-        }
-
-        let share = try await createShareIfNeeded()
-        guard peerRecord != nil else { throw LoomCloudKitError.noPeerRecord }
-
-        let sharingService = NSSharingService(named: .cloudSharing)
-        let itemProvider = NSItemProvider()
-        itemProvider.registerCloudKitShare(share, container: container)
-        sharingService?.perform(withItems: [itemProvider])
-    }
-    #endif
-
-    #if os(iOS) || os(visionOS)
-    public func createSharingController() async throws -> UICloudSharingController {
-        guard let container = cloudKitManager.container else {
-            throw LoomCloudKitError.containerUnavailable
-        }
-
-        let share = try await createShareIfNeeded()
-        guard peerRecord != nil else { throw LoomCloudKitError.noPeerRecord }
-
-        let controller = UICloudSharingController(share: share, container: container)
-        controller.availablePermissions = [.allowReadWrite]
-        return controller
-    }
-    #endif
-
-    public func acceptShare(_ metadata: CKShare.Metadata) async throws {
-        guard let container = cloudKitManager.container else {
-            throw LoomCloudKitError.containerUnavailable
-        }
-
-        try await container.accept(metadata)
-        cloudKitManager.clearShareParticipantCache()
-    }
-
-    private func createShareIfNeeded() async throws -> CKShare {
-        if let activeShare {
-            return activeShare
-        }
-        return try await createShare()
-    }
-
     private func refreshState() async throws {
-        if let record = try await fetchRegisteredPeerRecord() {
-            peerRecord = record
-            activeShare = try await fetchShare(for: record)
-        } else {
-            peerRecord = nil
-            activeShare = nil
-        }
+        peerRecord = try await fetchRegisteredPeerRecord()
     }
 
     private func fetchRegisteredPeerRecord() async throws -> CKRecord? {
@@ -443,7 +343,7 @@ public final class LoomCloudKitShareManager {
                 return record
             }
         } catch where Self.shouldIgnoreExistingPeerRecordQueryFailure(error) {
-            LoomLogger.cloud("ShareManager: existing peer lookup missed in CloudKit; creating a replacement record")
+            LoomLogger.cloud("PeerManager: existing peer lookup missed in CloudKit; creating a replacement record")
         } catch {
             LoomLogger.error(.cloud, error: error, message: "Failed to query existing peer record: ")
         }
@@ -468,7 +368,6 @@ public final class LoomCloudKitShareManager {
             if Self.isUnknownItemCloudKitError(error) {
                 self.cachedPeerRecordName = nil
                 peerRecord = nil
-                activeShare = nil
                 return nil
             }
             throw error
@@ -484,7 +383,8 @@ public final class LoomCloudKitShareManager {
         identityPublicKey: Data?,
         remoteAccessEnabled: Bool,
         signalingSessionID: String?,
-        bootstrapMetadata: LoomBootstrapMetadata?
+        bootstrapMetadata: LoomBootstrapMetadata?,
+        overlayHints: [LoomCloudKitOverlayHint]
     ) -> PeerRecordPopulationAttempt {
         record[LoomCloudKitPeerInfo.RecordKey.deviceID.rawValue] = deviceID.uuidString
         record[LoomCloudKitPeerInfo.RecordKey.name.rawValue] = name
@@ -503,10 +403,12 @@ public final class LoomCloudKitShareManager {
             record[LoomCloudKitPeerInfo.RecordKey.identityPublicKey.rawValue] = identityPublicKey
             record[LoomCloudKitPeerInfo.RecordKey.remoteAccessEnabled.rawValue] = remoteAccessEnabled ? 1 : 0
             record[LoomCloudKitPeerInfo.RecordKey.signalingSessionID.rawValue] = signalingSessionID
+            record[LoomCloudKitPeerInfo.RecordKey.overlayHintsBlob.rawValue] = try? JSONEncoder().encode(overlayHints)
         } else {
             record[LoomCloudKitPeerInfo.RecordKey.identityPublicKey.rawValue] = nil
             record[LoomCloudKitPeerInfo.RecordKey.remoteAccessEnabled.rawValue] = nil
             record[LoomCloudKitPeerInfo.RecordKey.signalingSessionID.rawValue] = nil
+            record[LoomCloudKitPeerInfo.RecordKey.overlayHintsBlob.rawValue] = nil
         }
 
         let attemptedBootstrapMetadataWrite = cloudKitSchemaSupportsBootstrapMetadata && bootstrapMetadata != nil
@@ -545,7 +447,7 @@ public final class LoomCloudKitShareManager {
             } catch where Self.shouldIgnoreParticipantIdentityRecordFailure(error) {
                 cloudKitSchemaSupportsParticipantIdentityRecords = false
                 LoomLogger.cloud(
-                    "ShareManager: schema rejected participant identity records; continuing without participant identity metadata"
+                    "PeerManager: schema rejected participant identity records; continuing without participant identity metadata"
                 )
             }
         }
@@ -570,97 +472,6 @@ public final class LoomCloudKitShareManager {
         _ = try await modifyRecords([record], [], .changedKeys)
     }
 
-    private func ensureShare() async throws -> CKShare {
-        let record = if let peerRecord {
-            peerRecord
-        } else if let record = try await fetchRegisteredPeerRecord() {
-            record
-        } else {
-            try await createPeerRecord()
-        }
-
-        let existingShare = if let activeShare {
-            activeShare
-        } else {
-            try await fetchShare(for: record)
-        }
-
-        if let existingShare {
-            if configureShare(existingShare, from: record) {
-                let saveResults = try await modifyRecords([existingShare], [], .changedKeys)
-                let savedShare = try saveResults[existingShare.recordID]?.get() as? CKShare ?? existingShare
-                activeShare = savedShare
-                return savedShare
-            }
-
-            activeShare = existingShare
-            return existingShare
-        }
-
-        let share = CKShare(rootRecord: record)
-        _ = configureShare(share, from: record)
-
-        let saveResults = try await modifyRecords([record, share], [], .changedKeys)
-        if let savedRecord = try saveResults[record.recordID]?.get() {
-            peerRecord = savedRecord
-            cachedPeerRecordName = savedRecord.recordID.recordName
-        }
-        guard let savedShare = try saveResults[share.recordID]?.get() as? CKShare else {
-            throw LoomCloudKitError.shareNotFound
-        }
-
-        activeShare = savedShare
-        return savedShare
-    }
-
-    private func createPeerRecord() async throws -> CKRecord {
-        #if os(macOS)
-        let peerName = Host.current().localizedName ?? "Mac"
-        #else
-        let peerName = "My Device"
-        #endif
-
-        let recordID = CKRecord.ID(recordName: UUID().uuidString, zoneID: peerZoneID)
-        let record = CKRecord(recordType: cloudKitManager.configuration.peerRecordType, recordID: recordID)
-        record[LoomCloudKitPeerInfo.RecordKey.name.rawValue] = peerName
-        record[LoomCloudKitPeerInfo.RecordKey.createdAt.rawValue] = Date()
-
-        let saveResults = try await modifyRecords([record], [], .changedKeys)
-        let savedRecord = try saveResults[recordID]?.get() ?? record
-        cachedPeerRecordName = savedRecord.recordID.recordName
-        peerRecord = savedRecord
-        return savedRecord
-    }
-
-    private func fetchShare(for record: CKRecord) async throws -> CKShare? {
-        guard let shareReference = record.share else { return nil }
-
-        do {
-            return try await fetchRecord(shareReference.recordID) as? CKShare
-        } catch {
-            if Self.isUnknownItemCloudKitError(error) {
-                return nil
-            }
-            throw error
-        }
-    }
-
-    @discardableResult
-    private func configureShare(_ share: CKShare, from peerRecord: CKRecord) -> Bool {
-        let expectedThumbnailData = shareThumbnailDataProvider(peerRecord)
-        let currentTitle = share[CKShare.SystemFieldKey.title] as? String
-        let currentThumbnailData = share[CKShare.SystemFieldKey.thumbnailImageData] as? Data
-        let needsUpdate = currentTitle != cloudKitManager.configuration.shareTitle ||
-            currentThumbnailData != expectedThumbnailData ||
-            share.publicPermission != .none
-
-        share[CKShare.SystemFieldKey.title] = cloudKitManager.configuration.shareTitle
-        share[CKShare.SystemFieldKey.thumbnailImageData] = expectedThumbnailData
-        share.publicPermission = .none
-
-        return needsUpdate
-    }
-
     private func normalizePeerName(_ name: String) -> String {
         name.lowercased().trimmingCharacters(in: .whitespacesAndNewlines)
     }
@@ -676,18 +487,12 @@ public final class LoomCloudKitShareManager {
 
 public enum LoomCloudKitError: LocalizedError, Sendable {
     case recordNotSaved
-    case noPeerRecord
-    case shareNotFound
     case containerUnavailable
 
     public var errorDescription: String? {
         switch self {
         case .recordNotSaved:
             "Failed to save record to CloudKit"
-        case .noPeerRecord:
-            "No peer record available for sharing"
-        case .shareNotFound:
-            "Share not found"
         case .containerUnavailable:
             "CloudKit is not available"
         }

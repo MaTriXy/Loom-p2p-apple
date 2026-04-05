@@ -24,7 +24,7 @@ package struct LoomHostRuntimeDependencies: Sendable {
     package let node: LoomNode
     package let cloudKitManager: LoomCloudKitManager?
     package let peerProvider: LoomCloudKitPeerProvider?
-    package let shareManager: LoomCloudKitShareManager?
+    package let peerManager: LoomCloudKitPeerManager?
     package let signalingClient: LoomRemoteSignalingClient?
     package let overlayDirectoryConfiguration: LoomOverlayDirectoryConfiguration?
     package let connectionCoordinator: LoomConnectionCoordinator
@@ -39,7 +39,7 @@ package struct LoomHostRuntimeDependencies: Sendable {
         node: LoomNode,
         cloudKitManager: LoomCloudKitManager?,
         peerProvider: LoomCloudKitPeerProvider?,
-        shareManager: LoomCloudKitShareManager?,
+        peerManager: LoomCloudKitPeerManager?,
         signalingClient: LoomRemoteSignalingClient?,
         overlayDirectoryConfiguration: LoomOverlayDirectoryConfiguration?,
         connectionCoordinator: LoomConnectionCoordinator,
@@ -53,7 +53,7 @@ package struct LoomHostRuntimeDependencies: Sendable {
         self.node = node
         self.cloudKitManager = cloudKitManager
         self.peerProvider = peerProvider
-        self.shareManager = shareManager
+        self.peerManager = peerManager
         self.signalingClient = signalingClient
         self.overlayDirectoryConfiguration = overlayDirectoryConfiguration
         self.connectionCoordinator = connectionCoordinator
@@ -141,8 +141,8 @@ package actor LoomHostRuntime {
             if let cloudKitManager = dependencies.cloudKitManager {
                 await cloudKitManager.initialize()
             }
-            if let shareManager = dependencies.shareManager {
-                await shareManager.setup()
+            if let peerManager = dependencies.peerManager {
+                await peerManager.setup()
             }
 
             let discovery = await MainActor.run {
@@ -482,8 +482,8 @@ package actor LoomHostRuntime {
                     advertisement: advertisement,
                     ttlSeconds: 360
                 )
-                if let shareManager = dependencies.shareManager {
-                    await shareManager.updateLastSeen()
+                if let peerManager = dependencies.peerManager {
+                    await peerManager.updateLastSeen()
                 }
             } catch let signalingError as LoomRemoteSignalingError {
                 await record(signalingError)
@@ -500,7 +500,7 @@ package actor LoomHostRuntime {
     }
 
     private func publishCurrentPeer() async throws {
-        guard let shareManager = dependencies.shareManager,
+        guard let peerManager = dependencies.peerManager,
               let cloudKitManager = dependencies.cloudKitManager else {
             return
         }
@@ -515,7 +515,7 @@ package actor LoomHostRuntime {
         let identity = try await MainActor.run {
             try (dependencies.node.identityManager ?? LoomIdentityManager.shared).currentIdentity()
         }
-        try await shareManager.registerPeer(
+        try await peerManager.registerPeer(
             deviceID: dependencies.deviceID,
             name: dependencies.serviceName,
             advertisement: advertisement,
@@ -545,8 +545,7 @@ package actor LoomHostRuntime {
 
         await peerProvider.fetchPeers()
         let cloudPeers = await MainActor.run {
-            (peerProvider.ownPeers + peerProvider.sharedPeers)
-                .filter { $0.deviceID != dependencies.deviceID }
+            peerProvider.ownPeers.filter { $0.deviceID != dependencies.deviceID }
         }
         cloudPeersByID = Dictionary(uniqueKeysWithValues: cloudPeers.map { ($0.id, $0) })
         await notifyStateChanged()
@@ -625,7 +624,7 @@ package actor LoomHostRuntime {
             sources.append(.overlay)
         }
         if let cloudPeer {
-            sources.append(cloudPeer.isShared ? .cloudKitShared : .cloudKitOwn)
+            sources.append(.cloudKitOwn)
             if cloudPeer.signalingSessionID != nil {
                 sources.append(.remoteSignaling)
             }
@@ -646,7 +645,6 @@ package actor LoomHostRuntime {
             deviceType: deviceType,
             sources: sources,
             isNearby: localPeer != nil,
-            isShared: cloudPeer?.isShared ?? false,
             remoteAccessEnabled: cloudPeer?.remoteAccessEnabled ?? false,
             signalingSessionID: cloudPeer?.signalingSessionID,
             advertisement: advertisement,
@@ -684,7 +682,6 @@ package actor LoomHostRuntime {
             deviceType: sessionContext.peerIdentity.deviceType,
             sources: signalingSessionID == nil ? [] : [.remoteSignaling],
             isNearby: false,
-            isShared: false,
             remoteAccessEnabled: signalingSessionID != nil,
             signalingSessionID: signalingSessionID,
             advertisement: LoomPeerAdvertisement(

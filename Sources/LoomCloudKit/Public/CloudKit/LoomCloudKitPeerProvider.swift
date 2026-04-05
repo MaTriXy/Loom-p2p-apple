@@ -17,7 +17,6 @@ import Observation
 @MainActor
 public final class LoomCloudKitPeerProvider {
     public private(set) var ownPeers: [LoomCloudKitPeerInfo] = []
-    public private(set) var sharedPeers: [LoomCloudKitPeerInfo] = []
     public private(set) var isLoading = false
     public private(set) var lastError: Error?
 
@@ -43,11 +42,7 @@ public final class LoomCloudKitPeerProvider {
         defer { isLoading = false }
         lastError = nil
 
-        async let ownTask: () = refreshOwnPeers()
-        async let sharedTask: () = refreshSharedPeers()
-
-        await ownTask
-        await sharedTask
+        await refreshOwnPeers()
     }
 
     public func refreshOwnPeers() async {
@@ -65,65 +60,13 @@ public final class LoomCloudKitPeerProvider {
             )
 
             let snapshots = makeSnapshots(
-                from: results,
-                isShared: false,
-                ownerUserID: nil
+                from: results
             )
             let peers = await peerRecordParser.parse(snapshots)
             ownPeers = peers.sorted { $0.name < $1.name }
             LoomLogger.cloud("Fetched \(peers.count) own peers from CloudKit")
         } catch {
             LoomLogger.error(.cloud, error: error, message: "Failed to fetch own peers: ")
-            lastError = error
-        }
-    }
-
-    public func refreshSharedPeers() async {
-        guard let container = cloudKitManager.container else { return }
-
-        let sharedDatabase = container.sharedCloudDatabase
-
-        do {
-            let zones = try await sharedDatabase.allRecordZones()
-            var snapshots: [PeerRecordSnapshot] = []
-            var processedCount = 0
-
-            for zone in zones {
-                let query = CKQuery(
-                    recordType: cloudKitManager.configuration.peerRecordType,
-                    predicate: NSPredicate(value: true)
-                )
-
-                do {
-                    let (results, _) = try await sharedDatabase.records(
-                        matching: query,
-                        inZoneWith: zone.zoneID
-                    )
-                    snapshots.append(
-                        contentsOf: makeSnapshots(
-                            from: results,
-                            isShared: true,
-                            ownerUserID: zone.zoneID.ownerName
-                        )
-                    )
-                    processedCount += results.count
-                    if processedCount.isMultiple(of: 25) {
-                        await Task.yield()
-                    }
-                } catch {
-                    LoomLogger.error(
-                        .cloud,
-                        error: error,
-                        message: "Failed to fetch peers from zone \(zone.zoneID.zoneName): "
-                    )
-                }
-            }
-
-            let peers = await peerRecordParser.parse(snapshots)
-            sharedPeers = peers.sorted { $0.name < $1.name }
-            LoomLogger.cloud("Fetched \(peers.count) shared peers from CloudKit")
-        } catch {
-            LoomLogger.error(.cloud, error: error, message: "Failed to enumerate shared zones: ")
             lastError = error
         }
     }
@@ -150,48 +93,12 @@ public final class LoomCloudKitPeerProvider {
         LoomLogger.cloud("Removed own CloudKit peer record(s) for \(deviceID)")
     }
 
-    public func removeSharedPeer(deviceID: UUID) async throws {
-        guard let container = cloudKitManager.container else { throw LoomCloudKitError.containerUnavailable }
-
-        let database = container.sharedCloudDatabase
-        let zones = try await database.allRecordZones()
-        var deletedRecord = false
-
-        for zone in zones {
-            let recordIDs = try await queryPeerRecordIDs(
-                database: database,
-                zoneID: zone.zoneID,
-                deviceID: deviceID
-            )
-            guard !recordIDs.isEmpty else { continue }
-
-            _ = try await database.modifyRecords(
-                saving: [],
-                deleting: recordIDs
-            )
-            deletedRecord = true
-        }
-
-        if !deletedRecord {
-            throw LoomCloudKitPeerProviderError.sharedPeerNotFound(deviceID: deviceID)
-        }
-
-        sharedPeers.removeAll { $0.deviceID == deviceID }
-        LoomLogger.cloud("Removed shared CloudKit peer record(s) for \(deviceID)")
-    }
-
     public func removePeer(_ peer: LoomCloudKitPeerInfo) async throws {
-        if peer.isShared {
-            try await removeSharedPeer(deviceID: peer.deviceID)
-        } else {
-            try await removeOwnPeer(deviceID: peer.deviceID)
-        }
+        try await removeOwnPeer(deviceID: peer.deviceID)
     }
 
     private func makeSnapshots(
-        from results: [(CKRecord.ID, Result<CKRecord, any Error>)],
-        isShared: Bool,
-        ownerUserID: String?
+        from results: [(CKRecord.ID, Result<CKRecord, any Error>)]
     ) -> [PeerRecordSnapshot] {
         var snapshots: [PeerRecordSnapshot] = []
         for (_, result) in results {
@@ -207,9 +114,8 @@ public final class LoomCloudKitPeerProvider {
                     remoteAccessEnabled: (record[LoomCloudKitPeerInfo.RecordKey.remoteAccessEnabled.rawValue] as? Int64).map { $0 != 0 },
                     signalingSessionID: record[LoomCloudKitPeerInfo.RecordKey.signalingSessionID.rawValue] as? String,
                     bootstrapMetadataBlob: record[LoomCloudKitPeerInfo.RecordKey.bootstrapMetadataBlob.rawValue] as? Data,
-                    lastSeen: record[LoomCloudKitPeerInfo.RecordKey.lastSeen.rawValue] as? Date,
-                    isShared: isShared,
-                    ownerUserID: ownerUserID
+                    overlayHintsBlob: record[LoomCloudKitPeerInfo.RecordKey.overlayHintsBlob.rawValue] as? Data,
+                    lastSeen: record[LoomCloudKitPeerInfo.RecordKey.lastSeen.rawValue] as? Date
                 )
             )
         }
@@ -246,9 +152,8 @@ private struct PeerRecordSnapshot: Sendable {
     let remoteAccessEnabled: Bool?
     let signalingSessionID: String?
     let bootstrapMetadataBlob: Data?
+    let overlayHintsBlob: Data?
     let lastSeen: Date?
-    let isShared: Bool
-    let ownerUserID: String?
 }
 
 private actor PeerRecordSnapshotParser {
@@ -273,6 +178,9 @@ private actor PeerRecordSnapshotParser {
         let bootstrapMetadata = snapshot.bootstrapMetadataBlob.flatMap {
             try? JSONDecoder().decode(LoomBootstrapMetadata.self, from: $0)
         }
+        let overlayHints = snapshot.overlayHintsBlob.flatMap {
+            try? JSONDecoder().decode([LoomCloudKitOverlayHint].self, from: $0)
+        } ?? []
 
         let projections = LoomHostCatalogCodec.projections(
             peerName: snapshot.name ?? "Unknown Peer",
@@ -285,25 +193,13 @@ private actor PeerRecordSnapshotParser {
                 deviceType: deviceType,
                 advertisement: projection.advertisement,
                 lastSeen: snapshot.lastSeen ?? Date.distantPast,
-                ownerUserID: snapshot.ownerUserID,
-                isShared: snapshot.isShared,
                 recordID: snapshot.recordID,
                 identityPublicKey: snapshot.identityPublicKey,
                 remoteAccessEnabled: snapshot.remoteAccessEnabled ?? false,
                 signalingSessionID: snapshot.signalingSessionID,
-                bootstrapMetadata: bootstrapMetadata
+                bootstrapMetadata: bootstrapMetadata,
+                overlayHints: overlayHints
             )
-        }
-    }
-}
-
-public enum LoomCloudKitPeerProviderError: LocalizedError, Sendable {
-    case sharedPeerNotFound(deviceID: UUID)
-
-    public var errorDescription: String? {
-        switch self {
-        case let .sharedPeerNotFound(deviceID):
-            "Shared peer \(deviceID.uuidString) was not found in accepted CloudKit shares."
         }
     }
 }

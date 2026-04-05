@@ -12,7 +12,6 @@ package enum LoomHostPeerSource: String, Codable, Sendable {
     case nearby
     case overlay
     case cloudKitOwn
-    case cloudKitShared
     case remoteSignaling
 }
 
@@ -22,7 +21,6 @@ package struct LoomHostPeerRecord: Codable, Hashable, Sendable, Identifiable {
     package let deviceType: DeviceType
     package let sources: [LoomHostPeerSource]
     package let isNearby: Bool
-    package let isShared: Bool
     package let remoteAccessEnabled: Bool
     package let signalingSessionID: String?
     package let advertisement: LoomPeerAdvertisement

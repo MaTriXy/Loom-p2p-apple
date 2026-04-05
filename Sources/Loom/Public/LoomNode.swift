@@ -20,6 +20,7 @@ public final class LoomNode {
 
     private var advertiser: BonjourAdvertiser?
     private var advertisingServiceName: String?
+    private var publishedAdvertisement: LoomPeerAdvertisement?
     private var directListeners: [LoomTransportKind: LoomDirectListener] = [:]
     private var directListenerPorts: [LoomTransportKind: UInt16] = [:]
     private var overlayProbeServer: LoomOverlayProbeServer?
@@ -36,6 +37,7 @@ public final class LoomNode {
 
     public func makeDiscovery(localDeviceID: UUID? = nil) -> LoomDiscovery {
         if let discovery {
+            discovery.enableBonjour = configuration.enableBonjour
             discovery.enablePeerToPeer = configuration.enablePeerToPeer
             if let localDeviceID {
                 discovery.localDeviceID = localDeviceID
@@ -45,6 +47,7 @@ public final class LoomNode {
 
         let discovery = LoomDiscovery(
             serviceType: configuration.serviceType,
+            enableBonjour: configuration.enableBonjour,
             enablePeerToPeer: configuration.enablePeerToPeer,
             localDeviceID: localDeviceID
         )
@@ -58,6 +61,25 @@ public final class LoomNode {
         onSession: @escaping @Sendable (LoomSession) -> Void
     ) async throws -> UInt16 {
         advertisingServiceName = serviceName
+
+        guard configuration.enableBonjour else {
+            let directListener = LoomDirectListener(
+                transportKind: .tcp,
+                enablePeerToPeer: configuration.enablePeerToPeer
+            )
+            let port = try await directListener.start(port: configuration.controlPort) { connection in
+                onSession(LoomSession(connection: connection))
+            }
+            directListeners[.tcp] = directListener
+            directListenerPorts[.tcp] = port
+            publishedAdvertisement = Self.advertisement(
+                advertisement,
+                withDirectTransportPorts: [.tcp: port],
+                serviceName: serviceName
+            )
+            return port
+        }
+
         let advertiser = BonjourAdvertiser(
             serviceName: serviceName,
             advertisement: advertisement,
@@ -65,9 +87,15 @@ public final class LoomNode {
             enablePeerToPeer: configuration.enablePeerToPeer
         )
         self.advertiser = advertiser
-        return try await advertiser.start(port: configuration.controlPort) { connection in
+        let port = try await advertiser.start(port: configuration.controlPort) { connection in
             onSession(LoomSession(connection: connection))
         }
+        publishedAdvertisement = Self.advertisement(
+            advertisement,
+            withDirectTransportPorts: [.tcp: port],
+            serviceName: serviceName
+        )
+        return port
     }
 
     public func stopAdvertising() async {
@@ -76,6 +104,7 @@ public final class LoomNode {
         let advertiser = self.advertiser
         self.advertiser = nil
         advertisingServiceName = nil
+        publishedAdvertisement = nil
         let directListeners = self.directListeners.values
         self.directListeners.removeAll()
         self.directListenerPorts.removeAll()
@@ -99,6 +128,7 @@ public final class LoomNode {
             withDirectTransportPorts: ports,
             serviceName: advertisingServiceName
         )
+        publishedAdvertisement = merged
         await advertiser?.updateAdvertisement(merged)
     }
 
@@ -354,8 +384,7 @@ public final class LoomNode {
     }
 
     private func startOverlayProbeServer(serviceName: String) async throws {
-        guard let overlayProbePort = configuration.overlayProbePort,
-              let advertiser else {
+        guard let overlayProbePort = configuration.overlayProbePort else {
             return
         }
 
@@ -363,7 +392,9 @@ public final class LoomNode {
         overlayProbeServer = nil
         await existingProbeServer?.stop()
         let probeServer = LoomOverlayProbeServer(port: overlayProbePort) {
-            let advertisement = await advertiser.currentAdvertisement()
+            guard let advertisement = await MainActor.run(body: { self.publishedAdvertisement }) else {
+                throw LoomError.protocolError("Overlay probe advertisement is unavailable.")
+            }
             return LoomOverlayProbeResponse(
                 name: serviceName,
                 deviceType: advertisement.deviceType ?? .unknown,

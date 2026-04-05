@@ -5,7 +5,6 @@
 //  Created by Ethan Lipnik on 3/10/26.
 //
 
-import CloudKit
 import Foundation
 import Loom
 import Observation
@@ -14,7 +13,7 @@ import Observation
 @Observable
 @MainActor
 public final class LoomContext {
-    /// Current merged peer snapshots for nearby and CloudKit-visible devices.
+    /// Current merged peer snapshots for nearby, same-account CloudKit, and overlay devices.
     public private(set) var peers: [LoomPeerSnapshot] = []
     /// Current connection snapshots tracked by the shared runtime.
     public private(set) var connections: [LoomConnectionSnapshot] = []
@@ -121,16 +120,6 @@ public final class LoomContext {
     /// Stops publishing signaling-backed remote reachability for the local peer.
     public func stopPublishingRemoteReachability() async {
         await store.stopRemoteHosting()
-    }
-
-    /// Creates or returns the current CloudKit share for the local peer publication.
-    public func createShare() async throws -> CKShare {
-        try await store.createShare()
-    }
-
-    /// Accepts an incoming CloudKit share and refreshes unified peer state.
-    public func acceptShare(_ metadata: CKShare.Metadata) async throws {
-        try await store.acceptShare(metadata)
     }
 
     private func apply(_ snapshot: LoomStoreSnapshot) {

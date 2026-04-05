@@ -381,7 +381,6 @@ struct LoomKitIntegrationTests {
             deviceType: .iPad,
             sources: [.nearby, .remoteSignaling],
             isNearby: true,
-            isShared: false,
             remoteAccessEnabled: true,
             signalingSessionID: "studio-ipad",
             advertisement: LoomPeerAdvertisement(
@@ -416,7 +415,6 @@ struct LoomKitIntegrationTests {
             deviceType: .iPhone,
             sources: [.nearby],
             isNearby: true,
-            isShared: false,
             remoteAccessEnabled: false,
             signalingSessionID: nil,
             advertisement: LoomPeerAdvertisement(
@@ -447,7 +445,6 @@ struct LoomKitIntegrationTests {
                 deviceType: peerDeviceType,
                 sources: [.nearby],
                 isNearby: true,
-                isShared: false,
                 remoteAccessEnabled: false,
                 signalingSessionID: nil,
                 advertisement: LoomPeerAdvertisement(

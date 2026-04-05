@@ -70,7 +70,7 @@ struct LoomStoreOverlayTests {
             ),
             cloudKitManager: nil,
             peerProvider: nil,
-            shareManager: nil,
+            peerManager: nil,
             signalingClient: nil,
             connectionCoordinator: LoomConnectionCoordinator(node: node)
         )

@@ -10,6 +10,16 @@
 import Foundation
 import Loom
 
+public struct LoomCloudKitOverlayHint: Codable, Hashable, Sendable {
+    public let host: String
+    public let probePort: UInt16?
+
+    public init(host: String, probePort: UInt16? = nil) {
+        self.host = host.trimmingCharacters(in: .whitespacesAndNewlines)
+        self.probePort = probePort
+    }
+}
+
 /// Represents a peer stored in CloudKit.
 public struct LoomCloudKitPeerInfo: Identifiable, Hashable, Sendable {
     public let id: LoomPeerID
@@ -17,13 +27,12 @@ public struct LoomCloudKitPeerInfo: Identifiable, Hashable, Sendable {
     public let deviceType: DeviceType
     public let advertisement: LoomPeerAdvertisement
     public let lastSeen: Date
-    public let ownerUserID: String?
-    public let isShared: Bool
     public let recordID: String
     public let identityPublicKey: Data?
     public let remoteAccessEnabled: Bool
     public let signalingSessionID: String?
     public let bootstrapMetadata: LoomBootstrapMetadata?
+    public let overlayHints: [LoomCloudKitOverlayHint]
 
     /// Typed capability view derived from the peer's current publication state.
     public var capabilities: LoomPeerCapabilities {
@@ -49,26 +58,24 @@ public struct LoomCloudKitPeerInfo: Identifiable, Hashable, Sendable {
         deviceType: DeviceType,
         advertisement: LoomPeerAdvertisement,
         lastSeen: Date,
-        ownerUserID: String?,
-        isShared: Bool,
         recordID: String,
         identityPublicKey: Data? = nil,
         remoteAccessEnabled: Bool = false,
         signalingSessionID: String? = nil,
-        bootstrapMetadata: LoomBootstrapMetadata? = nil
+        bootstrapMetadata: LoomBootstrapMetadata? = nil,
+        overlayHints: [LoomCloudKitOverlayHint] = []
     ) {
         self.id = id
         self.name = name
         self.deviceType = deviceType
         self.advertisement = advertisement
         self.lastSeen = lastSeen
-        self.ownerUserID = ownerUserID
-        self.isShared = isShared
         self.recordID = recordID
         self.identityPublicKey = identityPublicKey
         self.remoteAccessEnabled = remoteAccessEnabled
         self.signalingSessionID = signalingSessionID
         self.bootstrapMetadata = bootstrapMetadata
+        self.overlayHints = overlayHints
     }
 
     public init(
@@ -78,13 +85,12 @@ public struct LoomCloudKitPeerInfo: Identifiable, Hashable, Sendable {
         deviceType: DeviceType,
         advertisement: LoomPeerAdvertisement,
         lastSeen: Date,
-        ownerUserID: String?,
-        isShared: Bool,
         recordID: String,
         identityPublicKey: Data? = nil,
         remoteAccessEnabled: Bool = false,
         signalingSessionID: String? = nil,
-        bootstrapMetadata: LoomBootstrapMetadata? = nil
+        bootstrapMetadata: LoomBootstrapMetadata? = nil,
+        overlayHints: [LoomCloudKitOverlayHint] = []
     ) {
         self.init(
             id: LoomPeerID(deviceID: id, appID: appID),
@@ -92,13 +98,12 @@ public struct LoomCloudKitPeerInfo: Identifiable, Hashable, Sendable {
             deviceType: deviceType,
             advertisement: advertisement,
             lastSeen: lastSeen,
-            ownerUserID: ownerUserID,
-            isShared: isShared,
             recordID: recordID,
             identityPublicKey: identityPublicKey,
             remoteAccessEnabled: remoteAccessEnabled,
             signalingSessionID: signalingSessionID,
-            bootstrapMetadata: bootstrapMetadata
+            bootstrapMetadata: bootstrapMetadata,
+            overlayHints: overlayHints
         )
     }
 
@@ -123,6 +128,7 @@ public extension LoomCloudKitPeerInfo {
         case remoteAccessEnabled
         case signalingSessionID = "relaySessionID"
         case bootstrapMetadataBlob
+        case overlayHintsBlob
         case lastSeen
         case createdAt
     }

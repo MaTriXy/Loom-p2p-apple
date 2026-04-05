@@ -17,7 +17,7 @@ import UIKit
 
 /// Manages CloudKit operations for iCloud-based trust.
 ///
-/// Handles device registration, user identity fetching, and share participant caching.
+/// Handles device registration and user identity fetching for same-account peers.
 /// Initialize with a ``LoomCloudKitConfiguration`` to customize behavior.
 ///
 /// ## Usage
@@ -54,12 +54,6 @@ public final class LoomCloudKitManager {
 
     /// Whether initial setup has completed.
     public private(set) var isInitialized: Bool = false
-
-    /// Cache of share participant user IDs with expiration.
-    private var shareParticipantCache: [String: Date] = [:]
-
-    /// Cache of trusted participant identity key IDs with expiration.
-    private var shareParticipantIdentityCache: [String: Date] = [:]
 
     // MARK: - Initialization
 
@@ -204,8 +198,6 @@ public final class LoomCloudKitManager {
         isInitialized = false
         currentUserRecordID = nil
         isAvailable = false
-        shareParticipantCache.removeAll()
-        shareParticipantIdentityCache.removeAll()
         await initialize()
     }
 
@@ -256,74 +248,6 @@ public final class LoomCloudKitManager {
         )
     }
 
-    // MARK: - Share Participant Checking
-
-    /// Checks if a user ID is a participant in any accepted shares.
-    ///
-    /// - Parameter userID: The CloudKit user record ID to check.
-    /// - Returns: Whether the user is a share participant.
-    public func isShareParticipant(userID: String) async -> Bool {
-        // Check cache first
-        if let expiration = shareParticipantCache[userID], expiration > Date() { return true }
-
-        guard isAvailable, let container else { return false }
-
-        do {
-            // Fetch all accepted shares in the shared database
-            let sharedDatabase = container.sharedCloudDatabase
-            let zones = try await sharedDatabase.allRecordZones()
-
-            for zone in zones {
-                // Get the share for this zone
-                if let share = try await fetchShareForZone(zone, in: sharedDatabase) {
-                    // Check if the user is a participant
-                    for participant in share.participants {
-                        if let participantUserID = participant.userIdentity.userRecordID?.recordName,
-                           participantUserID == userID {
-                            // Cache the result
-                            shareParticipantCache[userID] = Date()
-                                .addingTimeInterval(configuration.shareParticipantCacheTTL)
-                            return true
-                        }
-                    }
-                }
-            }
-
-            return false
-        } catch {
-            LoomLogger.error(.cloud, error: error, message: "Failed to check share participants: ")
-            return false
-        }
-    }
-
-    /// Fetches the CKShare for a record zone if one exists.
-    private func fetchShareForZone(_ zone: CKRecordZone, in database: CKDatabase) async throws -> CKShare? {
-        let query = CKQuery(recordType: "cloudkit.share", predicate: NSPredicate(value: true))
-        let (results, _) = try await database.records(matching: query, inZoneWith: zone.zoneID)
-
-        for (_, result) in results {
-            if case let .success(record) = result, let share = record as? CKShare { return share }
-        }
-
-        return nil
-    }
-
-    /// Clears the share participant cache.
-    ///
-    /// Call this after share membership changes to ensure fresh data.
-    public func clearShareParticipantCache() {
-        shareParticipantCache.removeAll()
-        shareParticipantIdentityCache.removeAll()
-    }
-
-    /// Refreshes share participant data from CloudKit.
-    ///
-    /// Clears the cache so the next ``isShareParticipant(userID:)`` call fetches fresh data.
-    public func refreshShareParticipants() async {
-        shareParticipantCache.removeAll()
-        shareParticipantIdentityCache.removeAll()
-    }
-
     /// Registers the current device identity key metadata in the private device record.
     public func registerIdentity(keyID: String, publicKey: Data) async {
         guard isAvailable, let container else { return }
@@ -348,8 +272,7 @@ public final class LoomCloudKitManager {
     public func isPublishedPeerIdentityTrusted(
         deviceID: UUID,
         keyID: String,
-        publicKey: Data,
-        ownerUserID _: String?
+        publicKey: Data
     ) async -> Bool {
         guard isAvailable, let container else { return false }
 
@@ -400,51 +323,6 @@ public final class LoomCloudKitManager {
         return false
     }
 
-    /// Checks whether a shared participant has published the provided identity key.
-    public func isShareParticipantIdentityTrusted(keyID: String, publicKey: Data) async -> Bool {
-        let cacheKey = Self.identityCacheKey(keyID: keyID, publicKey: publicKey)
-        if let expiration = shareParticipantIdentityCache[cacheKey], expiration > Date() { return true }
-        guard isAvailable, let container else { return false }
-
-        do {
-            let sharedDatabase = container.sharedCloudDatabase
-            let zones = try await sharedDatabase.allRecordZones()
-            for zone in zones {
-                let query = CKQuery(
-                    recordType: configuration.participantIdentityRecordType,
-                    predicate: NSPredicate(format: "keyID == %@", keyID)
-                )
-                do {
-                    let (results, _) = try await sharedDatabase.records(
-                        matching: query,
-                        inZoneWith: zone.zoneID
-                    )
-                    if results.contains(where: { entry in
-                        guard case let .success(record) = entry.1 else {
-                            return false
-                        }
-                        let publishedPublicKey = record["publicKey"] as? Data
-                            ?? record["identityPublicKey"] as? Data
-                        return publishedPublicKey == publicKey
-                    }) {
-                        shareParticipantIdentityCache[cacheKey] = Date()
-                            .addingTimeInterval(configuration.shareParticipantCacheTTL)
-                        return true
-                    }
-                } catch {
-                    LoomLogger.error(
-                        .cloud,
-                        "Failed to query identity keys in shared zone \(zone.zoneID.zoneName): \(error)"
-                    )
-                }
-            }
-        } catch {
-            LoomLogger.error(.cloud, error: error, message: "Failed to enumerate shared zones for identity trust: ")
-        }
-
-        return false
-    }
-
     // MARK: - Account Change Handling
 
     /// Handles iCloud account changes by reinitializing.
@@ -464,10 +342,6 @@ extension LoomCloudKitManager {
         .milliseconds(400),
         .milliseconds(800),
     ]
-
-    static func identityCacheKey(keyID: String, publicKey: Data) -> String {
-        "\(keyID)|\(publicKey.base64EncodedString())"
-    }
 
     nonisolated static func isMissingPublishedIdentityLookupError(_ error: any Error) -> Bool {
         isMissingPublishedIdentityLookupError(error as NSError)

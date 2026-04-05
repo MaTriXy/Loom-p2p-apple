@@ -14,11 +14,9 @@ import Loom
 public enum LoomCloudKitTrustMode: Sendable {
     case manualOnly
     case sameAccountAutoTrust
-    case shareAwareAutoTrust
 }
 
-/// iCloud-based trust provider that auto-approves devices on the same iCloud account
-/// or devices belonging to friends via CloudKit sharing.
+/// iCloud-based trust provider that auto-approves devices on the same iCloud account.
 ///
 /// This provider implements a layered trust evaluation:
 ///
@@ -27,8 +25,7 @@ public enum LoomCloudKitTrustMode: Sendable {
 /// 3. If peer has no iCloud identity → `.requiresApproval`
 /// 4. If CloudKit is unavailable → `.unavailable`
 /// 5. If peer is on same iCloud account → `.trusted`
-/// 6. If peer is a share participant (friend) → `.trusted`
-/// 7. Otherwise → `.requiresApproval`
+/// 6. Otherwise → `.requiresApproval`
 ///
 /// ## Usage
 ///
@@ -46,7 +43,7 @@ public enum LoomCloudKitTrustMode: Sendable {
 public final class LoomCloudKitTrustProvider: LoomTrustProvider {
     // MARK: - Properties
 
-    /// CloudKit manager for user identity and share checking.
+    /// CloudKit manager for user identity and published-peer verification.
     private let cloudKitManager: LoomCloudKitManager
 
     /// Local trust store fallback for devices without iCloud.
@@ -57,8 +54,8 @@ public final class LoomCloudKitTrustProvider: LoomTrustProvider {
 
     /// Whether to require approval for all connections regardless of iCloud status.
     ///
-    /// When enabled, even devices on the same iCloud account or share participants
-    /// will require manual approval. Use this for high-security scenarios.
+    /// When enabled, even devices on the same iCloud account will require manual approval.
+    /// Use this for high-security scenarios.
     public var requireApprovalForAllConnections: Bool = false
 
     // MARK: - Initialization
@@ -66,13 +63,13 @@ public final class LoomCloudKitTrustProvider: LoomTrustProvider {
     /// Creates a CloudKit-based trust provider.
     ///
     /// - Parameters:
-    ///   - cloudKitManager: The CloudKit manager for identity and share checking.
+    ///   - cloudKitManager: The CloudKit manager for identity checking.
     ///   - localTrustStore: Local trust store for manually approved devices.
     ///   - trustMode: CloudKit-backed trust behavior layered above the local trust store.
     public init(
         cloudKitManager: LoomCloudKitManager,
         localTrustStore: LoomTrustStore,
-        trustMode: LoomCloudKitTrustMode = .shareAwareAutoTrust
+        trustMode: LoomCloudKitTrustMode = .sameAccountAutoTrust
     ) {
         self.cloudKitManager = cloudKitManager
         self.localTrustStore = localTrustStore
@@ -142,34 +139,13 @@ public final class LoomCloudKitTrustProvider: LoomTrustProvider {
             let identityTrusted = await cloudKitManager.isPublishedPeerIdentityTrusted(
                 deviceID: peer.deviceID,
                 keyID: peerIdentityKeyID,
-                publicKey: peerIdentityPublicKey,
-                ownerUserID: peerUserID
+                publicKey: peerIdentityPublicKey
             )
             if identityTrusted {
                 LoomLogger.trust("Trust evaluation: same-account published identity trusted for \(peer.name)")
                 return LoomTrustEvaluation(decision: .trusted, shouldShowAutoTrustNotice: true)
             }
             LoomLogger.trust("Trust evaluation: same-account identity missing trusted public key for \(peer.name)")
-            return LoomTrustEvaluation(decision: .requiresApproval, shouldShowAutoTrustNotice: false)
-        }
-
-        guard trustMode == .shareAwareAutoTrust else {
-            LoomLogger.trust("Trust evaluation: share-aware auto-trust disabled for \(peer.name)")
-            return LoomTrustEvaluation(decision: .requiresApproval, shouldShowAutoTrustNotice: false)
-        }
-
-        // Check if peer is a share participant (friend)
-        let isParticipant = await cloudKitManager.isShareParticipant(userID: peerUserID)
-        if isParticipant {
-            let identityTrusted = await cloudKitManager.isShareParticipantIdentityTrusted(
-                keyID: peerIdentityKeyID,
-                publicKey: peerIdentityPublicKey
-            )
-            if identityTrusted {
-                LoomLogger.trust("Trust evaluation: share participant identity trusted for \(peer.name)")
-                return LoomTrustEvaluation(decision: .trusted, shouldShowAutoTrustNotice: false)
-            }
-            LoomLogger.trust("Trust evaluation: share participant missing trusted identity key for \(peer.name)")
             return LoomTrustEvaluation(decision: .requiresApproval, shouldShowAutoTrustNotice: false)
         }
 

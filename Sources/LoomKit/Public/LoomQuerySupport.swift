@@ -15,9 +15,7 @@ public enum LoomPeerFilter: Sendable {
     case nearby
     /// Include only peers currently visible through the overlay directory.
     case overlay
-    /// Include only peers visible through a shared CloudKit graph.
-    case shared
-    /// Include only peers that currently publish signaling-backed remote reachability.
+    /// Include only peers that currently publish off-LAN reachability.
     case remoteAccessEnabled
 }
 
@@ -91,8 +89,6 @@ package enum LoomQueryEvaluator {
             peers.filter(\.isNearby)
         case .overlay:
             peers.filter { $0.sources.contains(.overlay) }
-        case .shared:
-            peers.filter(\.isShared)
         case .remoteAccessEnabled:
             peers.filter(\.remoteAccessEnabled)
         }

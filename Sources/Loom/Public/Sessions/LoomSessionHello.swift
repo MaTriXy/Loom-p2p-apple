@@ -283,6 +283,7 @@ public actor LoomSessionHelloValidator {
                 identityKeyID: hello.identity.keyID,
                 identityPublicKey: hello.identity.publicKey,
                 isIdentityAuthenticated: true,
+                advertisementMetadata: hello.advertisement.metadata,
                 endpoint: endpointDescription
             ),
             hello: hello

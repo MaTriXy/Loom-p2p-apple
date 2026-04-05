@@ -32,8 +32,6 @@ public enum LoomPeerSource: String, Codable, CaseIterable, Hashable, Sendable {
     case overlay
     /// Peer record published by the current iCloud account.
     case cloudKitOwn
-    /// Peer record visible through an accepted CloudKit share.
-    case cloudKitShared
     /// Remote signaling-backed remote peer currently reachable by session ID.
     case remoteSignaling
 }
@@ -50,9 +48,7 @@ public struct LoomPeerSnapshot: Identifiable, Hashable, Sendable {
     public let sources: [LoomPeerSource]
     /// Indicates whether the peer is currently reachable nearby.
     public let isNearby: Bool
-    /// Indicates whether the peer is visible through a shared CloudKit graph.
-    public let isShared: Bool
-    /// Indicates whether the peer currently publishes signaling-backed remote access.
+    /// Indicates whether the peer currently publishes off-LAN access.
     public let remoteAccessEnabled: Bool
     /// Remote signaling session identifier published for remote joins, when available.
     public let signalingSessionID: String?
@@ -90,7 +86,6 @@ public struct LoomPeerSnapshot: Identifiable, Hashable, Sendable {
         deviceType: DeviceType,
         sources: [LoomPeerSource],
         isNearby: Bool,
-        isShared: Bool,
         remoteAccessEnabled: Bool,
         signalingSessionID: String?,
         advertisement: LoomPeerAdvertisement,
@@ -102,7 +97,6 @@ public struct LoomPeerSnapshot: Identifiable, Hashable, Sendable {
         self.deviceType = deviceType
         self.sources = Array(Set(sources)).sorted { $0.rawValue < $1.rawValue }
         self.isNearby = isNearby
-        self.isShared = isShared
         self.remoteAccessEnabled = remoteAccessEnabled
         self.signalingSessionID = signalingSessionID
         self.advertisement = advertisement
@@ -117,7 +111,6 @@ public struct LoomPeerSnapshot: Identifiable, Hashable, Sendable {
         deviceType: DeviceType,
         sources: [LoomPeerSource],
         isNearby: Bool,
-        isShared: Bool,
         remoteAccessEnabled: Bool,
         signalingSessionID: String?,
         advertisement: LoomPeerAdvertisement,
@@ -130,7 +123,6 @@ public struct LoomPeerSnapshot: Identifiable, Hashable, Sendable {
             deviceType: deviceType,
             sources: sources,
             isNearby: isNearby,
-            isShared: isShared,
             remoteAccessEnabled: remoteAccessEnabled,
             signalingSessionID: signalingSessionID,
             advertisement: advertisement,

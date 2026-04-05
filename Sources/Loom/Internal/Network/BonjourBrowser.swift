@@ -23,6 +23,9 @@ public final class LoomDiscovery {
     /// Whether peer-to-peer WiFi discovery is enabled
     public var enablePeerToPeer: Bool = true
 
+    /// Whether Bonjour discovery is enabled.
+    public var enableBonjour: Bool = true
+
     /// Optional local device identifier used to filter self from discovery results.
     public var localDeviceID: UUID?
 
@@ -43,16 +46,24 @@ public final class LoomDiscovery {
 
     public init(
         serviceType: String = Loom.serviceType,
+        enableBonjour: Bool = true,
         enablePeerToPeer: Bool = true,
         localDeviceID: UUID? = nil
     ) {
         self.serviceType = serviceType
+        self.enableBonjour = enableBonjour
         self.enablePeerToPeer = enablePeerToPeer
         self.localDeviceID = localDeviceID
     }
 
     /// Start discovery on the local network.
     public func startDiscovery() {
+        guard enableBonjour else {
+            LoomLogger.discovery("Bonjour discovery disabled by configuration")
+            stopDiscovery()
+            return
+        }
+
         guard !isSearching else {
             LoomLogger.discovery("Already searching")
             return
@@ -311,6 +322,11 @@ public final class LoomDiscovery {
 
     /// Force a discovery refresh.
     public func refresh() {
+        guard enableBonjour else {
+            stopDiscovery()
+            return
+        }
+
         stopDiscovery()
         startDiscovery()
     }

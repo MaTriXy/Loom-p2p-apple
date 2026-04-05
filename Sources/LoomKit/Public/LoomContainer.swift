@@ -72,7 +72,7 @@ public final class LoomContainer {
         }
         let cloudKitManager = cloudKitConfiguration.map(LoomCloudKitManager.init(configuration:))
         let peerProvider = cloudKitManager.map(LoomCloudKitPeerProvider.init(cloudKitManager:))
-        let shareManager = cloudKitManager.map { LoomCloudKitShareManager(cloudKitManager: $0) }
+        let peerManager = cloudKitManager.map { LoomCloudKitPeerManager(cloudKitManager: $0) }
 
         if let cloudKitManager {
             node.trustProvider = LoomCloudKitTrustProvider(
@@ -115,7 +115,7 @@ public final class LoomContainer {
                         node: node,
                         cloudKitManager: cloudKitManager,
                         peerProvider: peerProvider,
-                        shareManager: shareManager,
+                        peerManager: peerManager,
                         signalingClient: signalingClient,
                         overlayDirectoryConfiguration: overlayDirectoryConfiguration,
                         connectionCoordinator: connectionCoordinator,
@@ -138,7 +138,7 @@ public final class LoomContainer {
             trustStore: trustStore,
             cloudKitManager: cloudKitManager,
             peerProvider: peerProvider,
-            shareManager: shareManager,
+            peerManager: peerManager,
             signalingClient: signalingClient,
             connectionCoordinator: connectionCoordinator,
             hostClient: hostClient
@@ -163,8 +163,6 @@ public final class LoomContainer {
             .manualOnly
         case .sameAccountAutoTrust:
             .sameAccountAutoTrust
-        case .shareAwareAutoTrust:
-            .shareAwareAutoTrust
         }
     }
 
@@ -178,10 +176,8 @@ public final class LoomContainer {
             peerRecordType: configuration.peerRecordType,
             peerZoneName: configuration.peerZoneName,
             participantIdentityRecordType: configuration.participantIdentityRecordType,
-            shareTitle: configuration.shareTitle,
             deviceIDKey: configuration.deviceIDKey,
-            deviceIDSuiteName: configuration.deviceIDSuiteName ?? deviceIDSuiteName,
-            shareParticipantCacheTTL: configuration.shareParticipantCacheTTL
+            deviceIDSuiteName: configuration.deviceIDSuiteName ?? deviceIDSuiteName
         )
     }
 }

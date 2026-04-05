@@ -4,13 +4,13 @@
 //
 //  Created by Ethan Lipnik on 1/28/26.
 //
-//  Configuration for CloudKit-based trust and sharing.
+//  Configuration for same-account CloudKit trust and peer registration.
 //
 
 import Foundation
 import Loom
 
-/// Configuration for Loom CloudKit integration.
+/// Configuration for same-account Loom CloudKit integration.
 ///
 /// Use this to customize CloudKit behavior for your app. The defaults use
 /// "Loom" prefixed names for record types and zones.
@@ -39,9 +39,10 @@ import Loom
 /// - `deviceType` (String) - Device type
 /// - `advertisementBlob` (Bytes) - Serialized peer advertisement
 /// - `identityPublicKey` (Bytes) - Public identity key
-/// - `remoteAccessEnabled` (Int64) - Whether remote access is on
-/// - `relaySessionID` (String) - Signaling session identifier
+/// - `remoteAccessEnabled` (Int64) - Whether off-LAN access is on
+/// - `relaySessionID` (String) - Optional signaling session identifier
 /// - `bootstrapMetadataBlob` (Bytes) - Serialized bootstrap metadata
+/// - `overlayHintsBlob` (Bytes) - Serialized overlay host hints
 ///
 /// **LoomParticipantIdentity** (or your custom `participantIdentityRecordType`):
 /// - `keyID` (String) - Identity key identifier
@@ -60,26 +61,20 @@ public struct LoomCloudKitConfiguration: Sendable {
     /// Record type for device registration.
     public let deviceRecordType: String
 
-    /// Record type for peer records used in sharing.
+    /// Record type for peer records used in same-account discovery.
     public let peerRecordType: String
 
     /// Zone name for peer records.
     public let peerZoneName: String
 
-    /// Record type for shared participant identity metadata.
+    /// Record type for participant identity metadata used by same-account trust.
     public let participantIdentityRecordType: String
-
-    /// Title shown in the CloudKit sharing UI.
-    public let shareTitle: String
 
     /// UserDefaults key for storing the stable device ID.
     public let deviceIDKey: String
 
     /// Optional App Group suite name used for shared device-ID persistence.
     public let deviceIDSuiteName: String?
-
-    /// Cache TTL for share participants in seconds.
-    public let shareParticipantCacheTTL: TimeInterval
 
     /// Creates a CloudKit configuration with the specified settings.
     ///
@@ -89,29 +84,23 @@ public struct LoomCloudKitConfiguration: Sendable {
     ///   - peerRecordType: Record type for peers. Defaults to "LoomPeer".
     ///   - peerZoneName: Zone name for peer records. Defaults to "LoomPeerZone".
     ///   - participantIdentityRecordType: Record type used for participant identity-key metadata.
-    ///   - shareTitle: Title for sharing UI. Defaults to "Peer Access".
     ///   - deviceIDKey: UserDefaults key for device ID. Defaults to Loom's shared key.
     ///   - deviceIDSuiteName: Optional App Group suite for shared device identity.
-    ///   - shareParticipantCacheTTL: Cache TTL in seconds. Defaults to 300 (5 minutes).
     public init(
         containerIdentifier: String,
         deviceRecordType: String = "LoomDevice",
         peerRecordType: String = "LoomPeer",
         peerZoneName: String = "LoomPeerZone",
         participantIdentityRecordType: String = "LoomParticipantIdentity",
-        shareTitle: String = "Peer Access",
         deviceIDKey: String = LoomSharedDeviceID.key,
-        deviceIDSuiteName: String? = nil,
-        shareParticipantCacheTTL: TimeInterval = 300
+        deviceIDSuiteName: String? = nil
     ) {
         self.containerIdentifier = containerIdentifier
         self.deviceRecordType = deviceRecordType
         self.peerRecordType = peerRecordType
         self.peerZoneName = peerZoneName
         self.participantIdentityRecordType = participantIdentityRecordType
-        self.shareTitle = shareTitle
         self.deviceIDKey = deviceIDKey
         self.deviceIDSuiteName = deviceIDSuiteName
-        self.shareParticipantCacheTTL = shareParticipantCacheTTL
     }
 }

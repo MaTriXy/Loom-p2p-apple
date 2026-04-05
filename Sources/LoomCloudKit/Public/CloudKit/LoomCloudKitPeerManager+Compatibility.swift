@@ -1,5 +1,5 @@
 //
-//  LoomCloudKitShareManager+Compatibility.swift
+//  LoomCloudKitPeerManager+Compatibility.swift
 //  Loom
 //
 //  Created by Ethan Lipnik on 3/11/26.
@@ -8,7 +8,7 @@
 import CloudKit
 import Foundation
 
-public extension LoomCloudKitShareManager {
+public extension LoomCloudKitPeerManager {
     nonisolated static func shouldRetryRegistrationWithoutBootstrapMetadata(
         error: Error,
         attemptedBootstrapMetadataWrite: Bool
@@ -50,10 +50,6 @@ public extension LoomCloudKitShareManager {
         return cloudKitErrorMessages(for: error).contains { message in
             message.lowercased().contains(loweredExpectedMessage)
         }
-    }
-
-    nonisolated static func isMissingProductionSchemaShareRecordError(_ error: Error) -> Bool {
-        isMissingProductionSchemaRecordTypeError(error, recordType: "cloudkit.share")
     }
 
     nonisolated static func isInvalidArgumentsCloudKitError(_ error: Error) -> Bool {

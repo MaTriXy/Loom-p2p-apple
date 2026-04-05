@@ -16,6 +16,7 @@ public struct LoomNetworkConfiguration: Sendable {
     public var udpPort: UInt16
     public var overlayProbePort: UInt16?
     public var maxPacketSize: Int
+    public var enableBonjour: Bool
     public var enablePeerToPeer: Bool
     public var requireEncryptedMediaOnLocalNetwork: Bool
     public var enabledDirectTransports: Set<LoomTransportKind>
@@ -30,6 +31,7 @@ public struct LoomNetworkConfiguration: Sendable {
         udpPort: UInt16 = 0,
         overlayProbePort: UInt16? = nil,
         maxPacketSize: Int = Loom.defaultMaxPacketSize,
+        enableBonjour: Bool = true,
         enablePeerToPeer: Bool = true,
         requireEncryptedMediaOnLocalNetwork: Bool = false,
         enabledDirectTransports: Set<LoomTransportKind> = Set(LoomTransportKind.allCases),
@@ -43,6 +45,7 @@ public struct LoomNetworkConfiguration: Sendable {
         self.udpPort = udpPort
         self.overlayProbePort = overlayProbePort
         self.maxPacketSize = maxPacketSize
+        self.enableBonjour = enableBonjour
         self.enablePeerToPeer = enablePeerToPeer
         self.requireEncryptedMediaOnLocalNetwork = requireEncryptedMediaOnLocalNetwork
         self.enabledDirectTransports = enabledDirectTransports
@@ -58,6 +61,7 @@ public struct LoomNetworkConfiguration: Sendable {
         udpPort: UInt16 = 0,
         overlayProbePort: UInt16? = nil,
         maxPacketSize: Int = Loom.defaultMaxPacketSize,
+        enableBonjour: Bool = true,
         enablePeerToPeer: Bool = true,
         requireEncryptedMediaOnLocalNetwork: Bool = false,
         enabledDirectTransports: Set<LoomTransportKind>,
@@ -71,6 +75,7 @@ public struct LoomNetworkConfiguration: Sendable {
             udpPort: udpPort,
             overlayProbePort: overlayProbePort,
             maxPacketSize: maxPacketSize,
+            enableBonjour: enableBonjour,
             enablePeerToPeer: enablePeerToPeer,
             requireEncryptedMediaOnLocalNetwork: requireEncryptedMediaOnLocalNetwork,
             enabledDirectTransports: enabledDirectTransports,
@@ -86,6 +91,7 @@ public struct LoomNetworkConfiguration: Sendable {
         quicPort: UInt16 = 0,
         udpPort: UInt16 = 0,
         maxPacketSize: Int = Loom.defaultMaxPacketSize,
+        enableBonjour: Bool = true,
         enablePeerToPeer: Bool = true,
         requireEncryptedMediaOnLocalNetwork: Bool = false,
         enabledDirectTransports: Set<LoomTransportKind>,
@@ -99,6 +105,7 @@ public struct LoomNetworkConfiguration: Sendable {
             udpPort: udpPort,
             overlayProbePort: nil,
             maxPacketSize: maxPacketSize,
+            enableBonjour: enableBonjour,
             enablePeerToPeer: enablePeerToPeer,
             requireEncryptedMediaOnLocalNetwork: requireEncryptedMediaOnLocalNetwork,
             enabledDirectTransports: enabledDirectTransports,

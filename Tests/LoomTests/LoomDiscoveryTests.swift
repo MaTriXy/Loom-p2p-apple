@@ -13,6 +13,22 @@ import Testing
 @Suite("Loom Discovery")
 struct LoomDiscoveryTests {
     @MainActor
+    @Test("Discovery stays stopped when Bonjour is disabled")
+    func discoveryDoesNotStartWhenBonjourIsDisabled() {
+        let discovery = LoomDiscovery(enableBonjour: false)
+
+        discovery.startDiscovery()
+
+        #expect(discovery.isSearching == false)
+        #expect(discovery.discoveredPeers.isEmpty)
+
+        discovery.refresh()
+
+        #expect(discovery.isSearching == false)
+        #expect(discovery.discoveredPeers.isEmpty)
+    }
+
+    @MainActor
     @Test("Discovery deduplicates multiple endpoints for one device and prefers the best transport")
     func discoveryDeduplicatesLogicalPeers() throws {
         let deviceID = UUID()

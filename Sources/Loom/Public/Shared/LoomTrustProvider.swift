@@ -84,6 +84,9 @@ public struct LoomPeerIdentity: Sendable, Codable, Equatable {
     /// Whether the handshake identity was cryptographically validated.
     public let isIdentityAuthenticated: Bool
 
+    /// Sanitized advertisement metadata carried in the session hello.
+    public let advertisementMetadata: [String: String]
+
     /// Network endpoint description (IP address or hostname).
     public let endpoint: String
 
@@ -97,6 +100,7 @@ public struct LoomPeerIdentity: Sendable, Codable, Equatable {
     ///   - identityKeyID: Optional handshake identity key identifier.
     ///   - identityPublicKey: Optional handshake identity public key bytes.
     ///   - isIdentityAuthenticated: Whether handshake identity verification succeeded.
+    ///   - advertisementMetadata: Sanitized advertisement metadata from the session hello.
     ///   - endpoint: Human-readable endpoint description.
     public init(
         deviceID: UUID,
@@ -106,6 +110,7 @@ public struct LoomPeerIdentity: Sendable, Codable, Equatable {
         identityKeyID: String?,
         identityPublicKey: Data?,
         isIdentityAuthenticated: Bool,
+        advertisementMetadata: [String: String] = [:],
         endpoint: String
     ) {
         self.deviceID = deviceID
@@ -115,6 +120,7 @@ public struct LoomPeerIdentity: Sendable, Codable, Equatable {
         self.identityKeyID = identityKeyID
         self.identityPublicKey = identityPublicKey
         self.isIdentityAuthenticated = isIdentityAuthenticated
+        self.advertisementMetadata = advertisementMetadata
         self.endpoint = endpoint
     }
 }

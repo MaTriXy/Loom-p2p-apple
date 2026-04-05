@@ -15,8 +15,6 @@ public enum LoomTrustMode: String, Codable, Sendable {
     case manualOnly
     /// Auto-trust peers that resolve to the same iCloud account.
     case sameAccountAutoTrust
-    /// Auto-trust peers that are visible through an accepted CloudKit share.
-    case shareAwareAutoTrust
 }
 
 /// Configuration for a shared LoomKit runtime container.
@@ -30,7 +28,7 @@ public struct LoomContainerConfiguration: Sendable {
     public let serviceName: String
     /// Optional shared `UserDefaults` suite used for stable device identity and trust state.
     public let deviceIDSuiteName: String?
-    /// Optional CloudKit configuration used to merge shared peers into the runtime.
+    /// Optional CloudKit configuration used to merge same-account peers into the runtime.
     public let cloudKit: LoomCloudKitConfiguration?
     /// Optional overlay directory configuration used for off-LAN peer discovery.
     public let overlayDirectory: LoomOverlayDirectoryConfiguration?

@@ -14,15 +14,14 @@ import Testing
 @Suite("Loom CloudKit Bootstrap Metadata")
 struct LoomCloudKitBootstrapMetadataTests {
     @MainActor
-    @Test("CloudKit peer provider defaults to empty peer lists")
-    func cloudKitPeerProviderDefaultsToEmptyPeerLists() {
+    @Test("CloudKit peer provider defaults to an empty own-peer list")
+    func cloudKitPeerProviderDefaultsToEmptyOwnPeerList() {
         let manager = LoomCloudKitManager(
             configuration: LoomCloudKitConfiguration(containerIdentifier: "iCloud.com.example.test")
         )
         let provider = LoomCloudKitPeerProvider(cloudKitManager: manager)
 
         #expect(provider.ownPeers.isEmpty)
-        #expect(provider.sharedPeers.isEmpty)
     }
 
     @Test("CloudKit bootstrap metadata blob roundtrip")
@@ -42,5 +41,20 @@ struct LoomCloudKitBootstrapMetadataTests {
         let blob = try #require(record[LoomCloudKitPeerInfo.RecordKey.bootstrapMetadataBlob.rawValue] as? Data)
         let decoded = try JSONDecoder().decode(LoomBootstrapMetadata.self, from: blob)
         #expect(decoded == metadata)
+    }
+
+    @Test("CloudKit overlay hint blob roundtrip")
+    func cloudKitOverlayHintBlobRoundtrip() throws {
+        let hints = [
+            LoomCloudKitOverlayHint(host: "altair.tailnet.ts.net", probePort: 9850),
+            LoomCloudKitOverlayHint(host: "10.8.0.12", probePort: 9980),
+        ]
+
+        let record = CKRecord(recordType: "Peer", recordID: CKRecord.ID(recordName: UUID().uuidString))
+        record[LoomCloudKitPeerInfo.RecordKey.overlayHintsBlob.rawValue] = try JSONEncoder().encode(hints)
+
+        let blob = try #require(record[LoomCloudKitPeerInfo.RecordKey.overlayHintsBlob.rawValue] as? Data)
+        let decoded = try JSONDecoder().decode([LoomCloudKitOverlayHint].self, from: blob)
+        #expect(decoded == hints)
     }
 }

@@ -13,6 +13,66 @@ import Testing
 @Suite("Loom Overlay Probe Server", .serialized)
 struct LoomOverlayProbeServerTests {
     @MainActor
+    @Test("Overlay probe publishing works without Bonjour advertising")
+    func overlayProbePublishingWorksWithoutBonjourAdvertising() async throws {
+        let serviceName = "Overlay Direct Host"
+        let probePort = try await reserveRandomPort()
+        let identityManager = LoomIdentityManager(
+            service: "com.ethanlipnik.loom.tests.overlay-direct.\(UUID().uuidString)",
+            account: "p256-signing",
+            synchronizable: false
+        )
+        let node = LoomNode(
+            configuration: LoomNetworkConfiguration(
+                serviceType: uniqueTestServiceType(prefix: "lod"),
+                overlayProbePort: probePort,
+                enableBonjour: false,
+                enablePeerToPeer: false,
+                enabledDirectTransports: [.tcp, .udp, .quic]
+            ),
+            identityManager: identityManager
+        )
+        let deviceID = UUID(uuidString: "00000000-0000-0000-0000-000000000017")!
+
+        do {
+            let ports = try await node.startAuthenticatedAdvertising(
+                serviceName: serviceName,
+                helloProvider: {
+                    LoomSessionHelloRequest(
+                        deviceID: deviceID,
+                        deviceName: serviceName,
+                        deviceType: .mac,
+                        advertisement: LoomPeerAdvertisement(
+                            deviceID: deviceID,
+                            deviceType: .mac
+                        )
+                    )
+                },
+                onSession: { _ in }
+            )
+            let response = try await LoomOverlayProbeClient.probe(
+                seed: LoomOverlaySeed(host: "127.0.0.1", probePort: probePort),
+                defaultPort: Loom.defaultOverlayProbePort,
+                timeout: .seconds(2)
+            )
+            let tcpPort = try #require(ports[.tcp])
+
+            #expect(response.name == serviceName)
+            #expect(response.advertisement.deviceID == deviceID)
+            #expect(response.advertisement.directTransports.contains(where: {
+                $0.transportKind == .tcp && $0.port == tcpPort
+            }))
+            #expect(response.advertisement.directTransports.contains(where: { $0.transportKind == .udp }))
+            #expect(response.advertisement.directTransports.contains(where: { $0.transportKind == .quic }))
+        } catch {
+            await node.stopAdvertising()
+            throw error
+        }
+
+        await node.stopAdvertising()
+    }
+
+    @MainActor
     @Test("Probe responses mirror the authenticated advertisement after listener ports are assigned")
     func probeResponseMirrorsAdvertisedPorts() async throws {
         let serviceName = "Overlay Probe Host"
@@ -26,6 +86,7 @@ struct LoomOverlayProbeServerTests {
             configuration: LoomNetworkConfiguration(
                 serviceType: uniqueTestServiceType(prefix: "lop"),
                 overlayProbePort: probePort,
+                enableBonjour: false,
                 enablePeerToPeer: false,
                 enabledDirectTransports: [.tcp]
             ),
@@ -89,6 +150,7 @@ struct LoomOverlayProbeServerTests {
                 serviceType: uniqueTestServiceType(prefix: "lop"),
                 controlPort: controlPort,
                 overlayProbePort: occupiedProbePort,
+                enableBonjour: false,
                 enablePeerToPeer: false,
                 enabledDirectTransports: [.tcp]
             ),
