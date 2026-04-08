@@ -38,6 +38,47 @@ struct LoomCloudKitPeerManagerTests {
         #expect(LoomCloudKitPeerManager.shouldIgnoreStaleOwnPeerCleanupFailure(CKError(.unknownItem)))
         #expect(LoomCloudKitPeerManager.shouldIgnoreExistingPeerRecordQueryFailure(CKError(.zoneNotFound)))
         #expect(LoomCloudKitPeerManager.shouldIgnoreStaleOwnPeerCleanupFailure(CKError(.zoneNotFound)))
+        #expect(LoomCloudKitPeerManager.isRetryablePeerWriteCloudKitError(CKError(.accountTemporarilyUnavailable)))
+        #expect(
+            LoomCloudKitPeerManager.retryDelayForPeerWriteCloudKitError(
+                CKError(.accountTemporarilyUnavailable),
+                attempt: 1
+            ) != nil
+        )
+    }
+
+    @MainActor
+    @Test("setup only verifies cached device-scoped peer records")
+    func setupDoesNotQueryArbitraryPeerRecords() async {
+        let configuration = LoomCloudKitConfiguration(containerIdentifier: "iCloud.com.example.test")
+        let cloudKitManager = LoomCloudKitManager(configuration: configuration)
+        var ensuredZone = false
+        var queryCount = 0
+        var fetchCount = 0
+        let manager = LoomCloudKitPeerManager(
+            cloudKitManager: cloudKitManager,
+            ensureZone: { _ in
+                ensuredZone = true
+            },
+            queryRecords: { _, _ in
+                queryCount += 1
+                return []
+            },
+            fetchRecord: { _ in
+                fetchCount += 1
+                throw CKError(.unknownItem)
+            },
+            modifyRecords: { _, _, _ in
+                [:]
+            }
+        )
+
+        await manager.setup()
+
+        #expect(ensuredZone)
+        #expect(queryCount == 0)
+        #expect(fetchCount == 0)
+        #expect(manager.peerRecord == nil)
     }
 
     @Test("Production schema rejection is classified for peer records")

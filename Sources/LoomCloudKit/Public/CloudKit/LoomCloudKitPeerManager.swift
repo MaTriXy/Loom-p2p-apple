@@ -316,7 +316,9 @@ public final class LoomCloudKitPeerManager {
     }
 
     private func refreshState() async throws {
-        peerRecord = try await fetchRegisteredPeerRecord()
+        if let cachedRecord = try await fetchCachedPeerRecord() {
+            peerRecord = cachedRecord
+        }
     }
 
     private func clearCachedPeerRecordForRecovery(
@@ -326,30 +328,6 @@ public final class LoomCloudKitPeerManager {
         cachedPeerRecordName = nil
         peerRecord = nil
         LoomLogger.cloud("PeerManager: clearing cached peer record after \(reason): \(error)")
-    }
-
-    private func fetchRegisteredPeerRecord() async throws -> CKRecord? {
-        if let peerRecord {
-            return peerRecord
-        }
-        if let cachedRecord = try await fetchCachedPeerRecord() {
-            return cachedRecord
-        }
-
-        let query = CKQuery(
-            recordType: cloudKitManager.configuration.peerRecordType,
-            predicate: NSPredicate(value: true)
-        )
-        let results = try await queryRecords(query, peerZoneID)
-
-        for (_, result) in results {
-            guard case let .success(record) = result else { continue }
-            cachedPeerRecordName = record.recordID.recordName
-            peerRecord = record
-            return record
-        }
-
-        return nil
     }
 
     private func fetchOrCreatePeerRecord(deviceID: UUID) async throws -> CKRecord {
@@ -395,17 +373,37 @@ public final class LoomCloudKitPeerManager {
         guard let cachedPeerRecordName else { return nil }
 
         let recordID = CKRecord.ID(recordName: cachedPeerRecordName, zoneID: peerZoneID)
-        do {
-            let record = try await fetchRecord(recordID)
-            peerRecord = record
-            return record
-        } catch {
-            if Self.isMissingPeerRecordZoneCloudKitError(error) {
-                self.cachedPeerRecordName = nil
-                peerRecord = nil
-                return nil
+        var attempt = 1
+
+        while true {
+            do {
+                let record = try await fetchRecord(recordID)
+                peerRecord = record
+                return record
+            } catch {
+                if let retryDelay = Self.retryDelayForPeerWriteCloudKitError(error, attempt: attempt) {
+                    LoomLogger.cloud(
+                        "PeerManager: transient CloudKit failure during cached peer fetch; retrying attempt \(attempt) in \(retryDelay)"
+                    )
+                    attempt += 1
+                    try await Task.sleep(for: retryDelay)
+                    continue
+                }
+
+                if Self.shouldClearCachedPeerRecordAfterLastSeenFailure(error) {
+                    clearCachedPeerRecordForRecovery(
+                        reason: "cached peer fetch failed",
+                        error: error
+                    )
+                    return nil
+                }
+                if Self.isMissingPeerRecordZoneCloudKitError(error) {
+                    self.cachedPeerRecordName = nil
+                    peerRecord = nil
+                    return nil
+                }
+                throw error
             }
-            throw error
         }
     }
 

@@ -207,19 +207,9 @@ public final class LoomCloudKitManager {
     private func registerCurrentDevice() async {
         guard isAvailable, let container else { return }
 
-        #if os(macOS)
-        let deviceName = Host.current().localizedName ?? "Mac"
-        let deviceType = "mac"
-        #elseif os(iOS)
-        let deviceName = UIDevice.current.name
-        let deviceType = UIDevice.current.userInterfaceIdiom == .pad ? "iPad" : "iPhone"
-        #elseif os(visionOS)
-        let deviceName = "Apple Vision Pro"
-        let deviceType = "vision"
-        #else
-        let deviceName = "Unknown Device"
-        let deviceType = "unknown"
-        #endif
+        let deviceInfo = Self.currentDeviceRegistrationInfo()
+        let deviceName = deviceInfo.name
+        let deviceType = deviceInfo.deviceType
 
         // Use a stable device identifier
         let deviceID = getOrCreateDeviceID()
@@ -238,6 +228,30 @@ public final class LoomCloudKitManager {
             // Don't treat registration failures as critical
             LoomLogger.error(.cloud, error: error, message: "Failed to register device in CloudKit: ")
         }
+    }
+
+    nonisolated package static func currentDeviceRegistrationInfo() -> (name: String, deviceType: String) {
+        #if os(macOS)
+        return (
+            name: Host.current().localizedName ?? "Mac",
+            deviceType: "mac"
+        )
+        #elseif os(iOS)
+        return (
+            name: UIDevice.current.name,
+            deviceType: UIDevice.current.userInterfaceIdiom == .pad ? "iPad" : "iPhone"
+        )
+        #elseif os(visionOS)
+        return (
+            name: "Apple Vision Pro",
+            deviceType: "vision"
+        )
+        #else
+        return (
+            name: "Unknown Device",
+            deviceType: "unknown"
+        )
+        #endif
     }
 
     /// Returns a stable device identifier, creating one if needed.

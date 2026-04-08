@@ -105,6 +105,48 @@ struct LoomOverlayDirectoryTests {
     }
 
     @MainActor
+    @Test("Overlay directory suppresses duplicate semantic peer snapshots")
+    func directorySuppressesDuplicateNotifications() async throws {
+        let response = LoomOverlayProbeResponse(
+            name: "Alpha",
+            deviceType: .mac,
+            advertisement: LoomPeerAdvertisement(
+                deviceID: UUID(uuidString: "00000000-0000-0000-0000-000000000031"),
+                deviceType: .mac,
+                directTransports: [
+                    LoomDirectTransportAdvertisement(transportKind: .tcp, port: 41031),
+                ]
+            )
+        )
+        let (server, port) = try await startOverlayProbeServer(response: response)
+        let seedState = LoomOverlaySeedState(
+            seeds: [LoomOverlaySeed(host: "127.0.0.1", probePort: port)]
+        )
+        let directory = LoomOverlayDirectory(
+            configuration: LoomOverlayDirectoryConfiguration(
+                refreshInterval: .seconds(3600),
+                probeTimeout: .seconds(2),
+                seedProvider: {
+                    await seedState.currentSeeds()
+                }
+            )
+        )
+
+        var notificationCount = 0
+        let token = directory.addPeersChangedObserver { _ in
+            notificationCount += 1
+        }
+        defer {
+            directory.removePeersChangedObserver(token)
+        }
+
+        await directory.refresh()
+        await directory.refresh()
+        #expect(notificationCount == 1)
+        await server.stop()
+    }
+
+    @MainActor
     @Test("Overlay directory collapses duplicate seeds and prefers QUIC-capable peers")
     func directoryPrefersQUICCandidateWhenSeedsDuplicateOnePeer() async throws {
         let deviceID = UUID(uuidString: "00000000-0000-0000-0000-000000000013")!

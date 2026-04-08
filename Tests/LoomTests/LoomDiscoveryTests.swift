@@ -88,6 +88,37 @@ struct LoomDiscoveryTests {
     }
 
     @MainActor
+    @Test("Discovery suppresses duplicate semantic peer snapshots")
+    func discoverySuppressesDuplicateNotifications() throws {
+        let discovery = LoomDiscovery()
+        let peer = makePeer(
+            id: UUID(),
+            name: "Studio Mac",
+            endpointPort: 5500,
+            directTransports: [
+                LoomDirectTransportAdvertisement(
+                    transportKind: .tcp,
+                    port: 5500,
+                    pathKind: .wifi
+                ),
+            ]
+        )
+
+        var notificationCount = 0
+        let token = discovery.addPeersChangedObserver { _ in
+            notificationCount += 1
+        }
+        defer {
+            discovery.removePeersChangedObserver(token)
+        }
+
+        discovery.upsertPeerForTesting(peer)
+        discovery.upsertPeerForTesting(peer)
+
+        #expect(notificationCount == 1)
+    }
+
+    @MainActor
     @Test("Discovery filters the local device identifier from emitted peers")
     func discoveryFiltersLocalDeviceID() {
         let localDeviceID = UUID()

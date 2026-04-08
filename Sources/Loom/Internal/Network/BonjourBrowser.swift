@@ -44,6 +44,7 @@ public final class LoomDiscovery {
     private var peerCandidatesByDeviceID: [UUID: [NWEndpoint: LoomHostDiscoveryCandidate]] = [:]
     private var peerIDByEndpoint: [NWEndpoint: UUID] = [:]
     private var peersByID: [LoomPeerID: LoomPeer] = [:]
+    private var lastPublishedPeerSnapshots: [PublishedPeerSnapshot] = []
 
     public init(
         serviceType: String = Loom.serviceType,
@@ -134,8 +135,7 @@ public final class LoomDiscovery {
         peerCandidatesByDeviceID.removeAll()
         peerIDByEndpoint.removeAll()
         peersByID.removeAll()
-        discoveredPeers.removeAll()
-        notifyPeersChanged()
+        publishDiscoveredPeers([])
     }
 
     private func handleBrowserState(_ state: NWBrowser.State) {
@@ -335,13 +335,13 @@ public final class LoomDiscovery {
     }
 
     private func updatePeersList() {
-        discoveredPeers = Array(peersByID.values).sorted { lhs, rhs in
+        let updatedPeers = Array(peersByID.values).sorted { lhs, rhs in
             if lhs.name != rhs.name {
                 return lhs.name < rhs.name
             }
             return lhs.id.rawValue < rhs.id.rawValue
         }
-        notifyPeersChanged()
+        publishDiscoveredPeers(updatedPeers)
     }
 
     /// Force a discovery refresh.
@@ -499,11 +499,34 @@ public final class LoomDiscovery {
         peersChangedObservers.removeValue(forKey: token)
     }
 
-    private func notifyPeersChanged() {
-        onPeersChanged?(discoveredPeers)
+    private func publishDiscoveredPeers(_ peers: [LoomPeer]) {
+        let snapshots = peers.map(PublishedPeerSnapshot.init)
+        guard snapshots != lastPublishedPeerSnapshots else { return }
+
+        discoveredPeers = peers
+        lastPublishedPeerSnapshots = snapshots
+        onPeersChanged?(peers)
         for observer in peersChangedObservers.values {
-            observer(discoveredPeers)
+            observer(peers)
         }
+    }
+}
+
+private struct PublishedPeerSnapshot: Equatable {
+    let id: LoomPeerID
+    let name: String
+    let deviceType: DeviceType
+    let endpoint: NWEndpoint
+    let advertisement: LoomPeerAdvertisement
+    let resolvedAddresses: [NWEndpoint.Host]
+
+    init(_ peer: LoomPeer) {
+        id = peer.id
+        name = peer.name
+        deviceType = peer.deviceType
+        endpoint = peer.endpoint
+        advertisement = peer.advertisement
+        resolvedAddresses = peer.resolvedAddresses
     }
 }
 

@@ -28,6 +28,7 @@ public final class LoomOverlayDirectory {
     private let configuration: LoomOverlayDirectoryConfiguration
     private var peersChangedObservers: [UUID: ([LoomPeer]) -> Void] = [:]
     private var refreshTask: Task<Void, Never>?
+    private var lastPublishedPeerSnapshots: [PublishedPeerSnapshot] = []
 
     public init(
         configuration: LoomOverlayDirectoryConfiguration,
@@ -54,8 +55,7 @@ public final class LoomOverlayDirectory {
         refreshTask?.cancel()
         refreshTask = nil
         isSearching = false
-        discoveredPeers.removeAll()
-        notifyPeersChanged()
+        publishDiscoveredPeers([])
     }
 
     /// Force an immediate seed refresh.
@@ -95,13 +95,11 @@ public final class LoomOverlayDirectory {
                 for: seeds,
                 configuration: configuration
             )
-            discoveredPeers = resolvePeers(from: candidates)
+            publishDiscoveredPeers(resolvePeers(from: candidates))
             isSearching = refreshTask != nil
-            notifyPeersChanged()
         } catch {
-            discoveredPeers.removeAll()
+            publishDiscoveredPeers([])
             isSearching = refreshTask != nil
-            notifyPeersChanged()
             LoomLogger.debug(.transport, "Overlay directory refresh failed: \(error.localizedDescription)")
         }
     }
@@ -229,11 +227,34 @@ public final class LoomOverlayDirectory {
         }
     }
 
-    private func notifyPeersChanged() {
-        onPeersChanged?(discoveredPeers)
+    private func publishDiscoveredPeers(_ peers: [LoomPeer]) {
+        let snapshots = peers.map(PublishedPeerSnapshot.init)
+        guard snapshots != lastPublishedPeerSnapshots else { return }
+
+        discoveredPeers = peers
+        lastPublishedPeerSnapshots = snapshots
+        onPeersChanged?(peers)
         for observer in peersChangedObservers.values {
-            observer(discoveredPeers)
+            observer(peers)
         }
+    }
+}
+
+private struct PublishedPeerSnapshot: Equatable {
+    let id: LoomPeerID
+    let name: String
+    let deviceType: DeviceType
+    let endpoint: NWEndpoint
+    let advertisement: LoomPeerAdvertisement
+    let resolvedAddresses: [NWEndpoint.Host]
+
+    init(_ peer: LoomPeer) {
+        id = peer.id
+        name = peer.name
+        deviceType = peer.deviceType
+        endpoint = peer.endpoint
+        advertisement = peer.advertisement
+        resolvedAddresses = peer.resolvedAddresses
     }
 }
 

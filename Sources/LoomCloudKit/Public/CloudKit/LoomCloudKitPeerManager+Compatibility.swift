@@ -73,6 +73,7 @@ public extension LoomCloudKitPeerManager {
         switch cloudKitError.code {
         case .networkUnavailable,
              .networkFailure,
+             .accountTemporarilyUnavailable,
              .serviceUnavailable,
              .requestRateLimited,
              .zoneBusy:
