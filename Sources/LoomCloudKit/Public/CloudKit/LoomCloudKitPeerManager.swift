@@ -112,8 +112,16 @@ public final class LoomCloudKitPeerManager {
         lastError = nil
 
         do {
-            try await ensureZone(CKRecordZone(zoneID: peerZoneID))
-            try await refreshState()
+            try await performRetryablePeerWrite(
+                operationName: "ensure peer zone"
+            ) {
+                try await ensureZone(CKRecordZone(zoneID: peerZoneID))
+            }
+            try await performRetryablePeerWrite(
+                operationName: "refresh peer state"
+            ) {
+                try await refreshState()
+            }
         } catch {
             lastError = error
             LoomLogger.error(.cloud, error: error, message: "PeerManager setup failed: ")
