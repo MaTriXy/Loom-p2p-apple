@@ -50,6 +50,7 @@ final class BonjourTXTRecordMonitor: NSObject, NetServiceBrowserDelegate, NetSer
 
     private var browser: NetServiceBrowser?
     private var workerThread: Thread?
+    private var monitorRunLoop: CFRunLoop?
     private var shouldStopWorker = false
     private var servicesByIdentity: [BonjourServiceIdentity: NetService] = [:]
 
@@ -78,6 +79,7 @@ final class BonjourTXTRecordMonitor: NSObject, NetServiceBrowserDelegate, NetSer
     func stop() {
         stateLock.lock()
         let thread = workerThread
+        let runLoop = monitorRunLoop
         shouldStopWorker = true
         stateLock.unlock()
 
@@ -87,14 +89,36 @@ final class BonjourTXTRecordMonitor: NSObject, NetServiceBrowserDelegate, NetSer
 
         if Thread.current == thread {
             stopOnMonitorThread()
-        } else {
-            perform(#selector(stopOnMonitorThread), on: thread, with: nil, waitUntilDone: true)
+            return
         }
+
+        guard let runLoop else {
+            return
+        }
+
+        let semaphore = DispatchSemaphore(value: 0)
+        CFRunLoopPerformBlock(runLoop, CFRunLoopMode.defaultMode.rawValue) { [weak self] in
+            self?.stopOnMonitorThread()
+            semaphore.signal()
+        }
+        CFRunLoopWakeUp(runLoop)
+        _ = semaphore.wait(timeout: .now() + 1)
     }
 
     @objc private func runMonitorThread() {
         autoreleasepool {
             let runLoop = RunLoop.current
+            let cfRunLoop = CFRunLoopGetCurrent()
+            stateLock.lock()
+            if shouldStopWorker {
+                workerThread = nil
+                monitorRunLoop = nil
+                stateLock.unlock()
+                return
+            }
+            monitorRunLoop = cfRunLoop
+            stateLock.unlock()
+
             let browser = NetServiceBrowser()
             browser.delegate = self
             browser.includesPeerToPeer = enablePeerToPeer
@@ -133,6 +157,7 @@ final class BonjourTXTRecordMonitor: NSObject, NetServiceBrowserDelegate, NetSer
 
         stateLock.lock()
         workerThread = nil
+        monitorRunLoop = nil
         stateLock.unlock()
         CFRunLoopStop(CFRunLoopGetCurrent())
     }
