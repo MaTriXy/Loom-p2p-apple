@@ -37,6 +37,7 @@ public final class LoomDiscovery {
 
     private var browser: NWBrowser?
     private var txtRecordMonitor: BonjourTXTRecordMonitor?
+    private let browserQueue = DispatchQueue(label: "com.mirage.loom.discovery.browser", qos: .utility)
     private let serviceType: String
     private var browseResultsByEndpoint: [NWEndpoint: NWBrowser.Result] = [:]
     private var txtRecordsByService: [BonjourServiceIdentity: [String: String]] = [:]
@@ -112,7 +113,7 @@ public final class LoomDiscovery {
             }
         }
 
-        browser?.start(queue: .main)
+        browser?.start(queue: browserQueue)
         isSearching = true
     }
 

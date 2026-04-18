@@ -39,37 +39,109 @@ struct BonjourServiceIdentity: Hashable {
     }
 }
 
-final class BonjourTXTRecordMonitor: NSObject, NetServiceBrowserDelegate, NetServiceDelegate {
+final class BonjourTXTRecordMonitor: NSObject, NetServiceBrowserDelegate, NetServiceDelegate, @unchecked Sendable {
     var onTXTRecordChanged: (@MainActor (BonjourServiceIdentity, [String: String]) -> Void)?
     var onServiceResolved: (@MainActor (BonjourServiceIdentity, [NWEndpoint.Host]) -> Void)?
     var onServiceRemoved: (@MainActor (BonjourServiceIdentity) -> Void)?
 
-    private let browser = NetServiceBrowser()
     private let serviceType: String
     private let enablePeerToPeer: Bool
+    private let stateLock = NSLock()
 
+    private var browser: NetServiceBrowser?
+    private var workerThread: Thread?
+    private var shouldStopWorker = false
     private var servicesByIdentity: [BonjourServiceIdentity: NetService] = [:]
 
     init(serviceType: String, enablePeerToPeer: Bool) {
         self.serviceType = serviceType
         self.enablePeerToPeer = enablePeerToPeer
         super.init()
-        browser.delegate = self
-        browser.includesPeerToPeer = enablePeerToPeer
     }
 
     func start() {
-        browser.searchForServices(ofType: serviceType, inDomain: "")
+        stateLock.lock()
+        guard workerThread == nil else {
+            stateLock.unlock()
+            return
+        }
+
+        shouldStopWorker = false
+        let thread = Thread(target: self, selector: #selector(runMonitorThread), object: nil)
+        thread.name = "Loom Bonjour TXT monitor"
+        workerThread = thread
+        stateLock.unlock()
+
+        thread.start()
     }
 
     func stop() {
-        browser.stop()
+        stateLock.lock()
+        let thread = workerThread
+        shouldStopWorker = true
+        stateLock.unlock()
+
+        guard let thread else {
+            return
+        }
+
+        if Thread.current == thread {
+            stopOnMonitorThread()
+        } else {
+            perform(#selector(stopOnMonitorThread), on: thread, with: nil, waitUntilDone: true)
+        }
+    }
+
+    @objc private func runMonitorThread() {
+        autoreleasepool {
+            let runLoop = RunLoop.current
+            let browser = NetServiceBrowser()
+            browser.delegate = self
+            browser.includesPeerToPeer = enablePeerToPeer
+            browser.schedule(in: runLoop, forMode: .default)
+            self.browser = browser
+            browser.searchForServices(ofType: serviceType, inDomain: "")
+
+            while shouldContinueRunning {
+                _ = autoreleasepool {
+                    runLoop.run(mode: .default, before: Date(timeIntervalSinceNow: 0.25))
+                }
+            }
+
+            stopOnMonitorThread()
+        }
+    }
+
+    @objc private func stopOnMonitorThread() {
+        stateLock.lock()
+        shouldStopWorker = true
+        stateLock.unlock()
+
+        let runLoop = RunLoop.current
+        browser?.stop()
+        browser?.remove(from: runLoop, forMode: .default)
+        browser?.delegate = nil
+        browser = nil
+
         for service in servicesByIdentity.values {
             service.stopMonitoring()
             service.stop()
+            service.remove(from: runLoop, forMode: .default)
             service.delegate = nil
         }
         servicesByIdentity.removeAll()
+
+        stateLock.lock()
+        workerThread = nil
+        stateLock.unlock()
+        CFRunLoopStop(CFRunLoopGetCurrent())
+    }
+
+    private var shouldContinueRunning: Bool {
+        stateLock.lock()
+        let shouldStop = shouldStopWorker
+        stateLock.unlock()
+        return !shouldStop
     }
 
     func netServiceBrowser(_ browser: NetServiceBrowser, didFind service: NetService, moreComing: Bool) {
@@ -77,12 +149,14 @@ final class BonjourTXTRecordMonitor: NSObject, NetServiceBrowserDelegate, NetSer
         if let existingService = servicesByIdentity[identity], existingService !== service {
             existingService.stopMonitoring()
             existingService.stop()
+            existingService.remove(from: RunLoop.current, forMode: .default)
             existingService.delegate = nil
         }
 
         servicesByIdentity[identity] = service
         service.delegate = self
         service.includesPeerToPeer = enablePeerToPeer
+        service.schedule(in: RunLoop.current, forMode: .default)
         service.resolve(withTimeout: 5)
         service.startMonitoring()
 
@@ -96,6 +170,7 @@ final class BonjourTXTRecordMonitor: NSObject, NetServiceBrowserDelegate, NetSer
         servicesByIdentity.removeValue(forKey: identity)
         service.stopMonitoring()
         service.stop()
+        service.remove(from: RunLoop.current, forMode: .default)
         service.delegate = nil
 
         Task { @MainActor [onServiceRemoved] in
