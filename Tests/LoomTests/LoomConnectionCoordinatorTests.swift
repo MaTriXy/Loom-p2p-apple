@@ -44,6 +44,39 @@ struct LoomConnectionCoordinatorTests {
     }
 
     @MainActor
+    @Test("Local discovery host override preserves advertised transport ports")
+    func localPlanUsesConfiguredHostOverride() async throws {
+        let node = LoomNode(
+            configuration: LoomNetworkConfiguration(
+                directConnectionPolicy: LoomDirectConnectionPolicy(
+                    preferredRemoteTransportOrder: [.quic, .tcp],
+                    localDiscoveryHostOverride: "127.0.0.1"
+                )
+            )
+        )
+        let coordinator = LoomConnectionCoordinator(node: node)
+        let peer = LoomPeer(
+            id: UUID(),
+            name: "Nearby Mac",
+            deviceType: .mac,
+            endpoint: .hostPort(host: "10.0.0.164", port: 4444),
+            advertisement: LoomPeerAdvertisement(
+                deviceType: .mac,
+                directTransports: [
+                    LoomDirectTransportAdvertisement(transportKind: .tcp, port: 4444),
+                    LoomDirectTransportAdvertisement(transportKind: .quic, port: 5555),
+                ]
+            )
+        )
+
+        let plan = try await coordinator.makePlan(localPeer: peer)
+
+        #expect(plan.targets.map(\.transportKind) == [.quic, .tcp])
+        #expect(plan.targets.first?.endpoint == .hostPort(host: "127.0.0.1", port: 5555))
+        #expect(plan.targets.last?.endpoint == .hostPort(host: "127.0.0.1", port: 4444))
+    }
+
+    @MainActor
     @Test("Local discovery prefers wired then Wi-Fi then AWDL when path hints are present")
     func localPlanPrefersConfiguredPathOrder() async throws {
         let node = LoomNode(

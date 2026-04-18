@@ -149,7 +149,8 @@ public final class LoomConnectionCoordinator {
                 contentsOf: Self.discoveryTargets(
                     from: localPeer,
                     source: .localDiscovery,
-                    policy: policy
+                    policy: policy,
+                    hostOverride: policy.localDiscoveryHostOverride
                 )
             )
         }
@@ -159,7 +160,8 @@ public final class LoomConnectionCoordinator {
                 contentsOf: Self.discoveryTargets(
                     from: overlayPeer,
                     source: .overlayDirectory,
-                    policy: policy
+                    policy: policy,
+                    hostOverride: nil
                 )
             )
         }
@@ -261,7 +263,8 @@ public final class LoomConnectionCoordinator {
     private static func discoveryTargets(
         from peer: LoomPeer,
         source: LoomConnectionTargetSource,
-        policy: LoomDirectConnectionPolicy
+        policy: LoomDirectConnectionPolicy,
+        hostOverride: String?
     ) -> [LoomConnectionTarget] {
         let advertisedTransports = peer.advertisement.directTransports
         let transports = advertisedTransports.isEmpty
@@ -286,7 +289,8 @@ public final class LoomConnectionCoordinator {
                 transportKind: transport.transportKind,
                 endpoint: localEndpoint(
                     from: peer.endpoint,
-                    advertisedPort: transport.port
+                    advertisedPort: transport.port,
+                    hostOverride: hostOverride
                 )
             )
         }
@@ -294,10 +298,15 @@ public final class LoomConnectionCoordinator {
 
     private static func localEndpoint(
         from endpoint: NWEndpoint,
-        advertisedPort: UInt16
+        advertisedPort: UInt16,
+        hostOverride: String? = nil
     ) -> NWEndpoint {
         guard advertisedPort > 0 else {
             return endpoint
+        }
+        if let hostOverride,
+           let port = NWEndpoint.Port(rawValue: advertisedPort) {
+            return .hostPort(host: NWEndpoint.Host(hostOverride), port: port)
         }
         guard case let .hostPort(host, _) = endpoint,
               let port = NWEndpoint.Port(rawValue: advertisedPort) else {

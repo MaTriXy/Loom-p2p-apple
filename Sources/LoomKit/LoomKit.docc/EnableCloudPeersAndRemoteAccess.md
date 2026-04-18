@@ -39,6 +39,8 @@ When you ask LoomKit to connect to a ``LoomPeerSnapshot``, it uses a fixed resol
 
 That ordering matters because the app-facing API stays stable while LoomKit still prefers the fastest and lowest-latency path first.
 
+Use ``LoomContainerConfiguration/enabledDirectTransports`` when a container should publish only a subset of Loom's direct transports. Use ``LoomContainerConfiguration/directConnectionPolicy`` when a container should keep Loom's resolution behavior but customize path order, transport order, local candidate racing, or a local-discovery host override.
+
 ## Trust Modes
 
 Use ``LoomTrustMode`` to decide how much approval friction to keep:

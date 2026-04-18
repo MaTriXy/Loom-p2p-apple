@@ -864,18 +864,38 @@ actor LoomStore {
             return currentPeerSnapshot
         }
 
+        return Self.fallbackPeerSnapshot(
+            from: sessionContext,
+            signalingSessionID: signalingSessionID
+        )
+    }
+
+    nonisolated static func fallbackPeerSnapshot(
+        from sessionContext: LoomAuthenticatedSessionContext,
+        signalingSessionID: String?
+    ) -> LoomPeerSnapshot {
+        let advertisement = sessionContext.peerAdvertisement
+        let peerIdentity = sessionContext.peerIdentity
+
         return LoomPeerSnapshot(
-            id: sessionContext.peerIdentity.deviceID,
-            name: sessionContext.peerIdentity.name,
-            deviceType: sessionContext.peerIdentity.deviceType,
+            id: peerIdentity.deviceID,
+            name: peerIdentity.name,
+            deviceType: peerIdentity.deviceType,
             sources: signalingSessionID == nil ? [] : [.remoteSignaling],
             isNearby: false,
             remoteAccessEnabled: signalingSessionID != nil,
             signalingSessionID: signalingSessionID,
             advertisement: LoomPeerAdvertisement(
-                deviceID: sessionContext.peerIdentity.deviceID,
-                identityKeyID: sessionContext.peerIdentity.identityKeyID,
-                deviceType: sessionContext.peerIdentity.deviceType
+                protocolVersion: advertisement.protocolVersion,
+                deviceID: advertisement.deviceID ?? peerIdentity.deviceID,
+                identityKeyID: advertisement.identityKeyID ?? peerIdentity.identityKeyID,
+                deviceType: advertisement.deviceType ?? peerIdentity.deviceType,
+                modelIdentifier: advertisement.modelIdentifier,
+                iconName: advertisement.iconName,
+                machineFamily: advertisement.machineFamily,
+                hostName: advertisement.hostName,
+                directTransports: advertisement.directTransports,
+                metadata: advertisement.metadata
             ),
             bootstrapMetadata: nil,
             lastSeen: Date()

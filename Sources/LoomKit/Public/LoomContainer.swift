@@ -39,8 +39,10 @@ public final class LoomContainer {
             overlayDirectory: configuration.overlayDirectory,
             remoteSignaling: configuration.remoteSignaling,
             appGroup: configuration.appGroup,
+            trustProvider: configuration.trustProvider,
             trust: configuration.trust,
             enablePeerToPeer: configuration.enablePeerToPeer,
+            enabledDirectTransports: configuration.enabledDirectTransports,
             advertisementMetadata: configuration.advertisementMetadata,
             supportedFeatures: configuration.supportedFeatures,
             bootstrapMetadataProvider: configuration.bootstrapMetadataProvider,
@@ -56,6 +58,7 @@ public final class LoomContainer {
             serviceType: trimmedServiceType,
             overlayProbePort: configuration.overlayDirectory?.probePort,
             enablePeerToPeer: configuration.enablePeerToPeer,
+            enabledDirectTransports: configuration.enabledDirectTransports,
             directConnectionPolicy: configuration.directConnectionPolicy
         )
         let trustStore = LoomTrustStore(suiteName: configuration.deviceIDSuiteName)
@@ -74,7 +77,9 @@ public final class LoomContainer {
         let peerProvider = cloudKitManager.map(LoomCloudKitPeerProvider.init(cloudKitManager:))
         let peerManager = cloudKitManager.map { LoomCloudKitPeerManager(cloudKitManager: $0) }
 
-        if let cloudKitManager {
+        if let trustProvider = self.configuration.trustProvider {
+            node.trustProvider = trustProvider
+        } else if let cloudKitManager {
             node.trustProvider = LoomCloudKitTrustProvider(
                 cloudKitManager: cloudKitManager,
                 localTrustStore: trustStore,

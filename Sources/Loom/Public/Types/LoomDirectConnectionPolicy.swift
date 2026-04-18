@@ -21,6 +21,13 @@ public struct LoomDirectConnectionPolicy: Sendable, Hashable {
     public var preferredLocalPathOrder: [LoomDirectPathKind]
     /// Preferred order for direct transport protocols published by remote signaling.
     public var preferredRemoteTransportOrder: [LoomTransportKind]
+    /// Optional host override for nearby Bonjour-discovered direct transports.
+    ///
+    /// This is intended for app-owned local runtimes such as an iOS Simulator
+    /// peer connecting back to a host process on the same Mac. It preserves
+    /// discovery metadata, transport ports, authentication, and trust checks;
+    /// only the host component of the direct endpoint is replaced.
+    public var localDiscoveryHostOverride: String?
     /// Whether nearby direct candidates should be treated as a race set by the coordinator.
     public var racesLocalCandidates: Bool
     /// Whether remote direct candidates should be treated as a race set by the coordinator.
@@ -30,11 +37,13 @@ public struct LoomDirectConnectionPolicy: Sendable, Hashable {
     public init(
         preferredLocalPathOrder: [LoomDirectPathKind] = [.wired, .wifi, .awdl, .other],
         preferredRemoteTransportOrder: [LoomTransportKind] = [.udp, .quic, .tcp],
+        localDiscoveryHostOverride: String? = nil,
         racesLocalCandidates: Bool = true,
         racesRemoteCandidates: Bool = true
     ) {
         self.preferredLocalPathOrder = preferredLocalPathOrder
         self.preferredRemoteTransportOrder = preferredRemoteTransportOrder
+        self.localDiscoveryHostOverride = localDiscoveryHostOverride
         self.racesLocalCandidates = racesLocalCandidates
         self.racesRemoteCandidates = racesRemoteCandidates
     }

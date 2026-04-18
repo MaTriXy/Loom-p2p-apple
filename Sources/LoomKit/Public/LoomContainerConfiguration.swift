@@ -36,10 +36,14 @@ public struct LoomContainerConfiguration: Sendable {
     public let remoteSignaling: LoomRemoteSignalingConfiguration?
     /// Optional macOS App Group configuration used to share one Loom runtime across multiple apps.
     public let appGroup: LoomAppGroupConfiguration?
+    /// Optional app-owned trust provider used instead of LoomKit's default local or CloudKit trust providers.
+    public let trustProvider: (any LoomTrustProvider)?
     /// Trust policy applied when evaluating nearby and CloudKit-backed peers.
     public let trust: LoomTrustMode
     /// Enables Bonjour peer-to-peer discovery when available on the platform.
     public let enablePeerToPeer: Bool
+    /// Direct transports this container should listen on and advertise.
+    public let enabledDirectTransports: Set<LoomTransportKind>
     /// App-defined metadata published with the local advertisement.
     public let advertisementMetadata: [String: String]
     /// Feature flags advertised for compatibility filtering.
@@ -62,8 +66,10 @@ public struct LoomContainerConfiguration: Sendable {
         overlayDirectory: LoomOverlayDirectoryConfiguration? = nil,
         remoteSignaling: LoomRemoteSignalingConfiguration? = nil,
         appGroup: LoomAppGroupConfiguration? = nil,
+        trustProvider: (any LoomTrustProvider)? = nil,
         trust: LoomTrustMode = .manualOnly,
         enablePeerToPeer: Bool = true,
+        enabledDirectTransports: Set<LoomTransportKind> = Set(LoomTransportKind.allCases),
         advertisementMetadata: [String: String] = [:],
         supportedFeatures: [String] = [],
         bootstrapMetadataProvider: BootstrapMetadataProvider? = nil,
@@ -78,8 +84,10 @@ public struct LoomContainerConfiguration: Sendable {
         self.overlayDirectory = overlayDirectory
         self.remoteSignaling = remoteSignaling
         self.appGroup = appGroup
+        self.trustProvider = trustProvider
         self.trust = trust
         self.enablePeerToPeer = enablePeerToPeer
+        self.enabledDirectTransports = enabledDirectTransports
         self.advertisementMetadata = advertisementMetadata
         self.supportedFeatures = Array(
             Set(

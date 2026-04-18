@@ -40,6 +40,8 @@ With `autostart` left at its default value of `true`, LoomKit starts the shared 
 
 > Important: Your app's Info.plist must include `NSBonjourServices` (containing your service type, e.g. `_example._tcp`) and `NSLocalNetworkUsageDescription`. Without these keys, discovery fails silently with error `-65555 (NoAuth)`. See the Loom documentation article "Configure Local Network Access" for the full setup and an Info.plist snippet.
 
+Apps that own their trust model can pass ``LoomContainerConfiguration/trustProvider`` into the container configuration. LoomKit uses that provider instead of its local or CloudKit-backed defaults while keeping the same SwiftUI container, context, query, and connection-handle surfaces.
+
 On macOS, the same container surface can also opt into an App Group-scoped shared runtime through ``LoomContainerConfiguration/appGroup``. That lets multiple apps keep one network owner while the SwiftUI layer still talks only to `LoomContext`, `LoomQuery`, and `LoomConnectionHandle`.
 
 ## Choose The Right Product
