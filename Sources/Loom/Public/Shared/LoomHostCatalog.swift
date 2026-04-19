@@ -155,9 +155,10 @@ public enum LoomHostCatalogCodec {
 
     public static func projections(
         peerName: String,
-        advertisement: LoomPeerAdvertisement
+        advertisement: LoomPeerAdvertisement,
+        fallbackDeviceID: UUID? = nil
     ) -> [LoomHostCatalogProjection] {
-        guard let deviceID = advertisement.deviceID else {
+        guard let deviceID = advertisement.deviceID ?? fallbackDeviceID else {
             return []
         }
 

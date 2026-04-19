@@ -216,7 +216,7 @@ public final class LoomDiscovery {
 
         let normalizedAdvertisement = LoomPeerAdvertisement(
             protocolVersion: advertisement.protocolVersion,
-            deviceID: advertisement.deviceID ?? peerID,
+            deviceID: advertisement.deviceID,
             identityKeyID: advertisement.identityKeyID,
             deviceType: advertisement.deviceType,
             modelIdentifier: advertisement.modelIdentifier,
@@ -364,20 +364,7 @@ public final class LoomDiscovery {
             name: peer.name,
             deviceType: peer.deviceType,
             endpoint: peer.endpoint,
-            advertisement: peer.advertisement.deviceID == nil
-                ? LoomPeerAdvertisement(
-                    protocolVersion: peer.advertisement.protocolVersion,
-                    deviceID: peer.deviceID,
-                    identityKeyID: peer.advertisement.identityKeyID,
-                    deviceType: peer.advertisement.deviceType,
-                    modelIdentifier: peer.advertisement.modelIdentifier,
-                    iconName: peer.advertisement.iconName,
-                    machineFamily: peer.advertisement.machineFamily,
-                    hostName: peer.advertisement.hostName,
-                    directTransports: peer.advertisement.directTransports,
-                    metadata: peer.advertisement.metadata
-                )
-                : peer.advertisement,
+            advertisement: peer.advertisement,
             resolvedAddresses: peer.resolvedAddresses
         )
         storeCandidate(candidate, for: peer.endpoint, peerID: peer.deviceID)
@@ -416,7 +403,8 @@ public final class LoomDiscovery {
         removeProjectedPeers(forDeviceID: peerID)
         let projections = LoomHostCatalogCodec.projections(
             peerName: preferredCandidate.name,
-            advertisement: preferredCandidate.advertisement
+            advertisement: preferredCandidate.advertisement,
+            fallbackDeviceID: peerID
         )
         for projection in projections {
             peersByID[projection.peerID] = LoomPeer(

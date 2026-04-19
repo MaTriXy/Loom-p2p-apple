@@ -222,7 +222,7 @@ struct LoomDiscoveryTests {
         #expect(fallbackPeer.name == peerName)
         #expect(fallbackPeer.deviceType == .unknown)
         #expect(fallbackPeer.deviceID != deviceID)
-        #expect(fallbackPeer.advertisement.deviceID == fallbackPeer.deviceID)
+        #expect(fallbackPeer.advertisement.deviceID == nil)
         #expect(fallbackPeer.advertisement.modelIdentifier == nil)
         #expect(fallbackPeer.advertisement.iconName == nil)
 
@@ -245,6 +245,32 @@ struct LoomDiscoveryTests {
         #expect(resolvedPeer.advertisement.directTransports == [advertisedTransport])
         #expect(resolvedPeer.advertisement.metadata["loom.role"] == "host")
         #expect(discovery.discoveredPeers.map(\.id).contains(fallbackPeer.id) == false)
+    }
+
+    @MainActor
+    @Test("Testing upsert preserves missing advertised device ID")
+    func testingUpsertPreservesMissingAdvertisedDeviceID() throws {
+        let discovery = LoomDiscovery()
+        let fallbackID = UUID()
+        let peer = LoomPeer(
+            id: fallbackID,
+            name: "Fallback Host",
+            deviceType: .mac,
+            endpoint: .hostPort(
+                host: "127.0.0.1",
+                port: NWEndpoint.Port(rawValue: 9901)!
+            ),
+            advertisement: LoomPeerAdvertisement(
+                deviceID: nil,
+                deviceType: .mac
+            )
+        )
+
+        discovery.upsertPeerForTesting(peer)
+
+        let discoveredPeer = try #require(discovery.discoveredPeers.first)
+        #expect(discoveredPeer.deviceID == fallbackID)
+        #expect(discoveredPeer.advertisement.deviceID == nil)
     }
 
     @MainActor
